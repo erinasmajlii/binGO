@@ -1,8 +1,52 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { useState, useRef } from "react";
 
 export function ReportScreen() {
+  const [permission, requestPermission] = useCameraPermissions();
+  const [showCamera, setShowCamera] = useState(false);
+  const cameraRef = useRef(null);
+
+  const handleOpenCamera = async () => {
+    const { granted } = await requestPermission();
+    if (!granted) {
+      Alert.alert("Permission denied", "Camera permission is required to take photos.");
+      return;
+    }
+    setShowCamera(true);
+  };
+
+  const takePhoto = async () => {
+    if (cameraRef.current) {
+      const photo = await cameraRef.current.takePictureAsync();
+      Alert.alert("Photo taken", `Photo saved at ${photo.uri}`);
+      setShowCamera(false);
+      // Here you can upload the photo or process it
+    }
+  };
+
+  if (showCamera) {
+    return (
+      <View style={styles.cameraContainer}>
+        <CameraView 
+          style={styles.camera} 
+          ref={cameraRef} 
+          facing="back"
+        />
+        <View style={styles.cameraControls}>
+          <TouchableOpacity style={styles.captureButton} onPress={takePhoto}>
+            <Ionicons name="camera" size={30} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
+            <Ionicons name="close" size={30} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -11,7 +55,7 @@ export function ReportScreen() {
           Snap a photo of litter to earn EcoXP.
         </Text>
 
-        <TouchableOpacity style={styles.button} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.button} activeOpacity={0.85} onPress={handleOpenCamera}>
           <Ionicons name="camera" size={20} color="#fff" />
           <Text style={styles.buttonText}>Open Camera</Text>
         </TouchableOpacity>
@@ -71,4 +115,35 @@ const styles = StyleSheet.create({
   tipRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 12 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#34d399", marginTop: 5 },
   tipText: { color: "#475569", fontSize: 14, flex: 1, lineHeight: 20 },
+  cameraContainer: { flex: 1, position: "relative" },
+  camera: { flex: 1 },
+  cameraControls: {
+    position: "absolute",
+    bottom: 50,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  captureButton: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: "#10b981",
+    justifyContent: "center",
+    alignItems: "center",
+    marginHorizontal: 20,
+  },
+  closeButton: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });
