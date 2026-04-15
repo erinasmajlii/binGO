@@ -1,54 +1,90 @@
-import { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useState, useEffect, useCallback } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { router, useFocusEffect } from "expo-router";
+import { supabase } from "../../lib/supabase";
 
 export function ProfileScreen() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [session, setSession] = useState<any>(null);
+  const [userData, setUserData] = useState<any>(null);
+  const [missionsCompleted, setMissionsCompleted] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  if (!isLoggedIn) {
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase.from('users').select('*').eq('id', userId).single();
+    if (!error && data) {
+      setUserData(data);
+    }
+    
+    // Fetch actual count of completed missions
+    const { count } = await supabase.from('user_missions').select('*', { count: 'exact', head: true }).eq('user_id', userId);
+    setMissionsCompleted(count || 0);
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      setSession(session);
+      if (session?.user?.id) fetchProfile(session.user.id);
+      else setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user?.id) fetchProfile(session.user.id);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (session?.user?.id) {
+        fetchProfile(session.user.id);
+      }
+    }, [session?.user?.id])
+  );
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color="#10b981" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!session) {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <ScrollView contentContainerStyle={styles.loginContent}>
           <View style={styles.loginCard}>
-            <Text style={styles.loginTitle}>Login</Text>
-            <Text style={styles.loginNote}>Backend is not connected yet. This is local mock auth.</Text>
+            <Text style={styles.loginTitle}>Not Logged In</Text>
+            <Text style={styles.loginNote}>Please log in to view your profile and track your progress.</Text>
 
-            <Text style={styles.label}>EMAIL</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="name@example.com"
-              placeholderTextColor="#94a3b8"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-            />
-
-            <Text style={styles.label}>PASSWORD</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter password"
-              placeholderTextColor="#94a3b8"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-
-            <TouchableOpacity style={styles.loginBtn} onPress={() => setIsLoggedIn(true)} activeOpacity={0.85}>
-              <Text style={styles.loginBtnText}>Login</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.skipBtn} onPress={() => setIsLoggedIn(true)}>
-              <Text style={styles.skipBtnText}>Skip for now</Text>
+            <TouchableOpacity style={styles.loginBtn} onPress={() => router.push("/login")} activeOpacity={0.85}>
+              <Text style={styles.loginBtnText}>Go to Login</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
       </SafeAreaView>
     );
   }
+
+  const xp = userData?.xp || 0;
+  const level = userData?.level || 1;
+  const nextLevelXp = level * 200;
+  const currentLevelBaseXp = (level - 1) * 200;
+  const xpIntoCurrentLevel = Math.max(0, xp - currentLevelBaseXp);
+  const levelProgress = Math.min(100, Math.max(0, (xpIntoCurrentLevel / 200) * 100));
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -61,18 +97,20 @@ export function ProfileScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.usernameLabel}>USERNAME</Text>
-              <Text style={styles.username}>Guest</Text>
+              <Text style={styles.username}>
+                {session?.user?.user_metadata?.name || session?.user?.email || "Guest"}
+              </Text>
             </View>
           </View>
 
           <View style={styles.xpBox}>
             <Text style={styles.xpLabel}>Total EcoXP</Text>
-            <Text style={styles.xpValue}>98,500</Text>
-            <Text style={styles.xpSub}>Level 7 • 110,000 needed for next level</Text>
+            <Text style={styles.xpValue}>{xp.toLocaleString()}</Text>
+            <Text style={styles.xpSub}>Level {level} • {nextLevelXp.toLocaleString()} needed for next level</Text>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: "90%" }]} />
+              <View style={[styles.progressFill, { width: `${levelProgress}%` }]} />
             </View>
-            <Text style={styles.progressLabel}>90% to level 8</Text>
+            <Text style={styles.progressLabel}>{Math.round(levelProgress)}% to level {level + 1}</Text>
           </View>
         </View>
 
@@ -86,7 +124,7 @@ export function ProfileScreen() {
             {[
               { icon: "camera-outline", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe", label: "PHOTOS", value: "128", sub: "Photos uploaded" },
               { icon: "flash-outline", color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff", label: "RATE", value: "3.4", sub: "Daily rate" },
-              { icon: "trophy-outline", color: "#10b981", bg: "#ecfdf5", border: "#a7f3d0", label: "MISSIONS", value: "42", sub: "Missions" },
+              { icon: "trophy-outline", color: "#10b981", bg: "#ecfdf5", border: "#a7f3d0", label: "MISSIONS", value: missionsCompleted.toString(), sub: "Missions" },
               { icon: "flame-outline", color: "#f97316", bg: "#fff7ed", border: "#fed7aa", label: "STREAK", value: "7", sub: "Streak" },
             ].map((s, i) => (
               <View key={i} style={[styles.statCard, { backgroundColor: s.bg, borderColor: s.border }]}>
@@ -101,7 +139,7 @@ export function ProfileScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={() => setIsLoggedIn(false)}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={() => supabase.auth.signOut()}>
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>

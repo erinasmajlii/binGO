@@ -1,7 +1,27 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, Image, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { router } from "expo-router";
+import { useState } from "react";
+import { supabase } from "../../lib/supabase";
 
 export function WelcomeScreen() {
+  const [loadingGuest, setLoadingGuest] = useState(false);
+
+  const handleGuestLogin = async () => {
+    setLoadingGuest(true);
+    const randomId = Math.floor(Math.random() * 100000000);
+    const guestEmail = `guest_${randomId}@bin-go.temp.com`;
+    const guestPass = `GuestPass${randomId}!`;
+    
+    await supabase.auth.signUp({
+      email: guestEmail,
+      password: guestPass,
+      options: { data: { name: "Guest User" } }
+    });
+    
+    setLoadingGuest(false);
+    router.replace("/(tabs)/home");
+  };
+
   return (
     <View style={styles.container}>
       {/* Decorative circles */}
@@ -25,6 +45,18 @@ export function WelcomeScreen() {
 
         <TouchableOpacity style={styles.button} onPress={() => router.push("/register")} activeOpacity={0.85}>
           <Text style={styles.buttonText}>Get Started</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.push("/login")} style={styles.loginOption}>
+          <Text style={styles.loginOptionText}>Already have an account? Log in</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={handleGuestLogin} style={styles.guestOption} disabled={loadingGuest}>
+          {loadingGuest ? (
+            <ActivityIndicator size="small" color="#059669" />
+          ) : (
+            <Text style={styles.guestOptionText}>Continue as Guest</Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -90,5 +122,29 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     fontSize: 16,
+  },
+  loginOption: {
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  loginOptionText: {
+    color: "#059669",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  guestOption: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: "#ecfdf5",
+    borderRadius: 14,
+    width: "100%",
+    maxWidth: 280,
+    alignItems: "center",
+  },
+  guestOptionText: {
+    color: "#059669",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

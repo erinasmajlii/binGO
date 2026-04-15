@@ -6,64 +6,68 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Switch,
   ActivityIndicator,
   Alert,
 } from "react-native";
 import { router } from "expo-router";
 import { supabase } from "../../lib/supabase";
 
-export function RegisterScreen() {
+export function LoginScreen() {
   const [form, setForm] = useState({
-    name: "",
     email: "",
     password: "",
-    confirmPassword: "",
-    acceptTerms: false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const set = (key: string, value: string | boolean) =>
+  const set = (key: string, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  const handleRegister = async () => {
+  const handleLogin = async () => {
     setError(null);
 
-    if (!form.name.trim()) { setError("Full name is required."); return; }
     if (!form.email.trim()) { setError("Email is required."); return; }
-    if (form.password.length < 6) { setError("Password must be at least 6 characters."); return; }
-    if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
-    if (!form.acceptTerms) { setError("You must accept the terms & conditions."); return; }
+    if (!form.password) { setError("Password is required."); return; }
 
     setLoading(true);
-    const { data, error: signUpError } = await supabase.auth.signUp({
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email: form.email.trim(),
       password: form.password,
-      options: {
-        data: { name: form.name.trim() },
-      },
     });
-    
-    // Explicitly insert into public.users as fallback
-    if (data?.user?.id) {
-      await supabase.from('users').upsert([
-        { id: data.user.id, username: form.name.trim(), xp: 0, level: 1, points: 0 }
-      ], { onConflict: 'id' });
-    }
-    
     setLoading(false);
 
-    if (signUpError) {
-      setError(signUpError.message);
+    if (signInError) {
+      setError(signInError.message);
       return;
     }
 
-    Alert.alert(
-      "Account created!",
-      "You can now log in.",
-      [{ text: "OK", onPress: () => router.replace("/login") }]
-    );
+    // Navigate to home on success
+    router.replace("/(tabs)/home");
+  };
+
+  const handleGuestLogin = async () => {
+    setError(null);
+    setLoading(true);
+    
+    // Create a temporary guest account using a fake email
+    const randomId = Math.floor(Math.random() * 100000000);
+    const guestEmail = `guest_${randomId}@bin-go.temp.com`;
+    const guestPass = `GuestPass${randomId}!`;
+    
+    const { error: signUpError } = await supabase.auth.signUp({
+      email: guestEmail,
+      password: guestPass,
+      options: { data: { name: "Guest User" } }
+    });
+    
+    setLoading(false);
+    
+    if (signUpError) {
+      setError("Could not create guest session: " + signUpError.message);
+      return;
+    }
+    
+    router.replace("/(tabs)/home");
   };
 
   return (
@@ -73,22 +77,15 @@ export function RegisterScreen() {
       <View style={[styles.circle, { bottom: -60, right: -60, width: 200, height: 200, backgroundColor: "#a7f3d0" }]} />
 
       <View style={styles.header}>
-        <Text style={styles.subtitle}>Welcome to</Text>
+        <Text style={styles.subtitle}>Welcome back to</Text>
         <Text style={styles.title}>
           bin<Text style={styles.titleBold}>Go</Text>
         </Text>
         <Text style={styles.description}>
-          How you manage your waste?{"\n"}If not, then start from now.
+          Let's continue making the world a cleaner place.
         </Text>
       </View>
 
-      <TextInput
-        style={styles.input}
-        placeholder="Full name"
-        placeholderTextColor="#94a3b8"
-        value={form.name}
-        onChangeText={(v) => set("name", v)}
-      />
       <TextInput
         style={styles.input}
         placeholder="Email address"
@@ -106,41 +103,27 @@ export function RegisterScreen() {
         value={form.password}
         onChangeText={(v) => set("password", v)}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Confirm password"
-        placeholderTextColor="#94a3b8"
-        secureTextEntry
-        value={form.confirmPassword}
-        onChangeText={(v) => set("confirmPassword", v)}
-      />
-
-      <View style={styles.termsRow}>
-        <Switch
-          value={form.acceptTerms}
-          onValueChange={(v) => set("acceptTerms", v)}
-          trackColor={{ true: "#10b981" }}
-          thumbColor="#fff"
-        />
-        <Text style={styles.termsText}>I accept the terms & conditions</Text>
-      </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <TouchableOpacity
         style={[styles.button, loading && styles.buttonDisabled]}
-        onPress={handleRegister}
+        onPress={handleLogin}
         disabled={loading}
         activeOpacity={0.85}
       >
         {loading
           ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.buttonText}>Register</Text>
+          : <Text style={styles.buttonText}>Log in</Text>
         }
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => router.replace("/login")} style={styles.skip}>
-        <Text style={styles.skipText}>Already have an account? Login</Text>
+      <TouchableOpacity onPress={() => router.replace("/register")} style={styles.skip}>
+        <Text style={styles.skipText}>Don't have an account? Register</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={handleGuestLogin} style={styles.guestBtn}>
+        <Text style={styles.guestBtnText}>Continue as Guest</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -148,9 +131,9 @@ export function RegisterScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f0fdf4" },
-  content: { padding: 24, paddingBottom: 48, alignItems: "center" },
+  content: { padding: 24, paddingVertical: 80, alignItems: "center", flexGrow: 1, justifyContent: "center" },
   circle: { position: "absolute", borderRadius: 999, opacity: 0.5 },
-  header: { alignItems: "center", marginBottom: 28, zIndex: 1 },
+  header: { alignItems: "center", marginBottom: 40, zIndex: 1 },
   subtitle: { color: "#475569", fontSize: 14, marginBottom: 4 },
   title: { fontSize: 48, color: "#059669", fontWeight: "300", marginBottom: 8 },
   titleBold: { fontWeight: "700" },
@@ -165,10 +148,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#1e293b",
     backgroundColor: "#fff",
-    marginBottom: 12,
+    marginBottom: 16,
   },
-  termsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20, width: "100%" },
-  termsText: { color: "#475569", fontSize: 13 },
   button: {
     width: "100%",
     backgroundColor: "#10b981",
@@ -181,10 +162,13 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
     marginBottom: 16,
+    marginTop: 8,
   },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  skip: { paddingVertical: 8 },
+  skip: { paddingVertical: 8, marginTop: 16 },
   skipText: { color: "#059669", fontSize: 14 },
+  guestBtn: { paddingVertical: 12, marginTop: 8, backgroundColor: "#ecfdf5", width: "100%", borderRadius: 16, alignItems: "center" },
+  guestBtnText: { color: "#059669", fontSize: 15, fontWeight: "600" },
   errorText: { color: "#dc2626", fontSize: 13, marginBottom: 12, textAlign: "center", width: "100%" },
   buttonDisabled: { opacity: 0.6 },
 });
