@@ -1,12 +1,102 @@
-import { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { useEffect, useState } from "react";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+import { checkSupabaseReachable, getSupabaseConfigIssue, supabase } from "../../lib/supabase";
 
 export function ProfileScreen() {
+  const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [username, setUsername] = useState("Guest");
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let mounted = true;
+
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!mounted) return;
+
+      setIsLoggedIn(Boolean(user));
+      setUsername(user?.email ?? "Guest");
+    })();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user;
+      setIsLoggedIn(Boolean(user));
+      setUsername(user?.email ?? "Guest");
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogin = async () => {
+    setAuthMessage(null);
+
+    if (!email.trim() || !password) {
+      setAuthMessage("Email and password are required.");
+      return;
+    }
+
+    const configIssue = getSupabaseConfigIssue();
+    if (configIssue) {
+      setAuthMessage(configIssue);
+      return;
+    }
+
+    const reachabilityIssue = await checkSupabaseReachable();
+    if (reachabilityIssue) {
+      setAuthMessage(reachabilityIssue);
+      return;
+    }
+
+    if (!supabase) {
+      setAuthMessage("Supabase client is not configured. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env and restart Expo.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setAuthMessage(error.message);
+        return;
+      }
+
+      setPassword("");
+      setAuthMessage(null);
+      router.push("/(tabs)/home");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setAuthMessage(message || "Login failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+
+    setIsLoggedIn(false);
+    setUsername("Guest");
+    setPassword("");
+  };
 
   if (!isLoggedIn) {
     return (
@@ -14,7 +104,7 @@ export function ProfileScreen() {
         <ScrollView contentContainerStyle={styles.loginContent}>
           <View style={styles.loginCard}>
             <Text style={styles.loginTitle}>Login</Text>
-            <Text style={styles.loginNote}>Backend is not connected yet. This is local mock auth.</Text>
+            <Text style={styles.loginNote}>Use your registered email and password.</Text>
 
             <Text style={styles.label}>EMAIL</Text>
             <TextInput
@@ -37,8 +127,10 @@ export function ProfileScreen() {
               onChangeText={setPassword}
             />
 
-            <TouchableOpacity style={styles.loginBtn} onPress={() => setIsLoggedIn(true)} activeOpacity={0.85}>
-              <Text style={styles.loginBtnText}>Login</Text>
+            {authMessage ? <Text style={styles.authError}>{authMessage}</Text> : null}
+
+            <TouchableOpacity style={[styles.loginBtn, loading && styles.loginBtnDisabled]} onPress={handleLogin} activeOpacity={0.85} disabled={loading}>
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.loginBtnText}>Login</Text>}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.skipBtn} onPress={() => setIsLoggedIn(true)}>
@@ -57,11 +149,11 @@ export function ProfileScreen() {
         <View style={styles.card}>
           <View style={styles.profileRow}>
             <View style={styles.avatarLarge}>
-              <Text style={styles.avatarText}>G</Text>
+              <Text style={styles.avatarText}>{username.charAt(0).toUpperCase()}</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.usernameLabel}>USERNAME</Text>
-              <Text style={styles.username}>Guest</Text>
+              <Text style={styles.username}>{username}</Text>
             </View>
           </View>
 
@@ -101,8 +193,8 @@ export function ProfileScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={() => setIsLoggedIn(false)}>
-          <Text style={styles.logoutText}>Logout</Text>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -118,7 +210,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 11, fontWeight: "600", color: "#475569", marginBottom: 6 },
   input: { backgroundColor: "#ecfdf5", borderWidth: 1, borderColor: "#a7f3d0", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: "#1e293b", marginBottom: 14 },
   loginBtn: { backgroundColor: "#10b981", paddingVertical: 14, borderRadius: 12, alignItems: "center", marginBottom: 10 },
+  loginBtnDisabled: { opacity: 0.7 },
   loginBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  authError: { color: "#dc2626", fontSize: 12, marginBottom: 10 },
   skipBtn: { backgroundColor: "#ecfdf5", paddingVertical: 12, borderRadius: 12, alignItems: "center" },
   skipBtnText: { color: "#059669", fontSize: 14 },
   content: { padding: 20, paddingBottom: 40 },

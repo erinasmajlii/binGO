@@ -18,6 +18,7 @@ node_modules/
 /web-build
 
 # local env files
+.env
 .env*.local
 
 # logs

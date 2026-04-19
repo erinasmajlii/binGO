@@ -8,10 +8,9 @@ import {
   ScrollView,
   Switch,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { router } from "expo-router";
-import { supabase } from "../../lib/supabase";
+import { checkSupabaseReachable, getSupabaseConfigIssue, supabase } from "../../lib/supabase";
 
 export function RegisterScreen() {
   const [form, setForm] = useState({
@@ -37,26 +36,66 @@ export function RegisterScreen() {
     if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
     if (!form.acceptTerms) { setError("You must accept the terms & conditions."); return; }
 
-    setLoading(true);
-    const { error: signUpError } = await supabase.auth.signUp({
-      email: form.email.trim(),
-      password: form.password,
-      options: {
-        data: { name: form.name.trim(), address: form.address.trim() },
-      },
-    });
-    setLoading(false);
-
-    if (signUpError) {
-      setError(signUpError.message);
+    const configIssue = getSupabaseConfigIssue();
+    if (configIssue) {
+      setError(configIssue);
       return;
     }
 
-    Alert.alert(
-      "Account created!",
-      "Check your email to confirm your account, then log in.",
-      [{ text: "OK", onPress: () => router.replace("/(tabs)/home") }]
-    );
+    const reachabilityIssue = await checkSupabaseReachable();
+    if (reachabilityIssue) {
+      setError(reachabilityIssue);
+      return;
+    }
+
+    if (!supabase) {
+      setError("Supabase client is not configured. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env and restart Expo.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: form.email.trim(),
+        password: form.password,
+        options: {
+          data: { name: form.name.trim(), address: form.address.trim() },
+        },
+      });
+
+      if (signUpError) {
+        setError(signUpError.message);
+        return;
+      }
+
+      // Try signing in immediately so users land in the app directly.
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: form.email.trim(),
+        password: form.password,
+      });
+
+      if (signInError) {
+        // Some projects require email confirmation before login.
+        // Still send users to Home as requested.
+        router.replace("/(tabs)/home");
+        return;
+      }
+
+      router.replace("/(tabs)/home");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.toLowerCase().includes("network request failed")) {
+        setError(
+          "Cannot reach Supabase from this device. Check internet access and confirm EXPO_PUBLIC_SUPABASE_URL points to a real project URL."
+        );
+        return;
+      }
+
+      setError(message || "Registration failed.");
+      return;
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

@@ -1,8 +1,40 @@
+import { useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+import { supabase } from "../../lib/supabase";
 
 export function HomeScreen() {
+  const router = useRouter();
+  const [username, setUsername] = useState("Guest");
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let mounted = true;
+
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      if (!mounted) return;
+
+      setUsername(user?.email ?? "Guest");
+    })();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user;
+      setUsername(user?.email ?? "Guest");
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const userInitial = username.charAt(0).toUpperCase();
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Header */}
@@ -17,9 +49,9 @@ export function HomeScreen() {
           <View style={styles.lvBadge}>
             <Text style={styles.lvText}>Lv 7</Text>
           </View>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>K</Text>
-          </View>
+          <TouchableOpacity style={styles.avatar} onPress={() => router.push("/(tabs)/profile")}>
+            <Text style={styles.avatarText}>{userInitial}</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -64,7 +96,7 @@ export function HomeScreen() {
             <Text style={styles.actionTitle}>Suggested next actions</Text>
           </View>
 
-          <TouchableOpacity style={styles.actionItem} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.actionItem} activeOpacity={0.8} onPress={() => router.push("/(tabs)/report")}>
             <View style={[styles.iconBox, { backgroundColor: "#10b981" }]}>
               <Ionicons name="trash" size={20} color="#fff" />
             </View>
@@ -74,7 +106,7 @@ export function HomeScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.actionItem, styles.purpleItem]} activeOpacity={0.8}>
+          <TouchableOpacity style={[styles.actionItem, styles.purpleItem]} activeOpacity={0.8} onPress={() => router.push("/(tabs)/missions")}>
             <View style={[styles.iconBox, { backgroundColor: "#c084fc" }]}>
               <Ionicons name="trophy" size={20} color="#fff" />
             </View>

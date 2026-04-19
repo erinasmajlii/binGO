@@ -3,11 +3,50 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useState, useRef } from "react";
+import { router } from "expo-router";
+import * as Location from "expo-location";
+import { BinMarker, loadBins } from "../../lib/bins";
+import { setActiveRoute } from "../../lib/route";
 
 export function ReportScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
-  const cameraRef = useRef(null);
+  const cameraRef = useRef<CameraView | null>(null);
+
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+
+  const distanceInMeters = (
+    fromLat: number,
+    fromLon: number,
+    toLat: number,
+    toLon: number
+  ) => {
+    const earthRadius = 6371000;
+    const dLat = toRadians(toLat - fromLat);
+    const dLon = toRadians(toLon - fromLon);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(fromLat)) * Math.cos(toRadians(toLat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const getNearestBin = (bins: BinMarker[], latitude: number, longitude: number) => {
+    if (bins.length === 0) return null;
+
+    let nearest: BinMarker | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const bin of bins) {
+      const distance = distanceInMeters(latitude, longitude, bin.latitude, bin.longitude);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = bin;
+      }
+    }
+
+    return nearest;
+  };
 
   const handleOpenCamera = async () => {
     const { granted } = await requestPermission();
@@ -21,9 +60,52 @@ export function ReportScreen() {
   const takePhoto = async () => {
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync();
-      Alert.alert("Photo taken", `Photo saved at ${photo.uri}`);
       setShowCamera(false);
-      // Here you can upload the photo or process it
+
+      const bins = await loadBins();
+      if (bins.length === 0) {
+        Alert.alert("Photo taken", `Photo saved at ${photo.uri}. Add at least one bin on the map to get directions.`);
+        return;
+      }
+
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert("Photo taken", "Photo saved. Enable location to route to the nearest bin.");
+          return;
+        }
+
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        const nearest = getNearestBin(bins, current.coords.latitude, current.coords.longitude);
+        if (!nearest) {
+          Alert.alert("Photo taken", "No bins found to route to.");
+          return;
+        }
+
+        await setActiveRoute({
+          destination: nearest,
+          createdAt: Date.now(),
+        });
+
+        Alert.alert(
+          "Photo taken",
+          "Route to nearest bin is ready. Show route on map now?",
+          [
+            { text: "Not now", style: "cancel" },
+            {
+              text: "Open route",
+              onPress: () => {
+                router.push("/(tabs)/map");
+              },
+            },
+          ]
+        );
+      } catch {
+        Alert.alert("Photo taken", "Photo saved, but we could not calculate route to a bin.");
+      }
     }
   };
 

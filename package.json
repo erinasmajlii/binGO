@@ -6,6 +6,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
+    "start:go": "expo start --go --lan --clear",
+    "start:go:tunnel": "expo start --go --tunnel --clear",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
