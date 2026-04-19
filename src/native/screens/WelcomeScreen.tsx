@@ -1,5 +1,60 @@
-import { View, Text, Image, TouchableOpacity, StyleSheet } from "react-native";
+import { useEffect, useRef } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from "react-native";
 import { router } from "expo-router";
+
+function TrashCanHero() {
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 4600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+
+  const spinInterpolate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  return (
+    <View style={styles.heroWrap}>
+      <View style={styles.binShadow} />
+
+      <View style={styles.binLid}>
+        <View style={styles.binHandle} />
+      </View>
+
+      <View style={styles.binBody}>
+        <View style={styles.binInnerGlow} />
+
+        <View style={styles.binBadge}>
+          <Animated.View style={[styles.starOrbit, { transform: [{ rotate: spinInterpolate }] }]}>
+            <Text style={[styles.orbitStar, styles.orbitStarTop]}>✦</Text>
+            <Text style={[styles.orbitStar, styles.orbitStarRight]}>•</Text>
+            <Text style={[styles.orbitStar, styles.orbitStarBottom]}>✦</Text>
+            <Text style={[styles.orbitStar, styles.orbitStarLeft]}>•</Text>
+          </Animated.View>
+
+          <View style={styles.coreStarWrap}>
+            <Text style={styles.coreStar}>★</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.sparkle, styles.sparkleLeft]} />
+      <View style={[styles.sparkle, styles.sparkleMid]} />
+      <View style={[styles.sparkle, styles.sparkleRight]} />
+    </View>
+  );
+}
 
 export function WelcomeScreen() {
   return (
@@ -15,11 +70,7 @@ export function WelcomeScreen() {
           bin<Text style={styles.titleBold}>Go</Text>
         </Text>
 
-        <Image
-          source={require("../../../assets/earth_illustration.png")}
-          style={styles.illustration}
-          resizeMode="contain"
-        />
+        <TrashCanHero />
 
         <Text style={styles.tagline}>Manage your waste effectively!</Text>
 
@@ -54,16 +105,158 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 52,
     color: "#059669",
-    marginBottom: 28,
+    marginBottom: 24,
     fontWeight: "300",
   },
   titleBold: {
     fontWeight: "700",
   },
-  illustration: {
+  heroWrap: {
     width: 240,
-    height: 200,
-    marginBottom: 24,
+    height: 240,
+    marginBottom: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  binShadow: {
+    position: "absolute",
+    bottom: 16,
+    width: 132,
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: "#7dd3af",
+    opacity: 0.35,
+  },
+  binLid: {
+    width: 150,
+    height: 34,
+    borderRadius: 14,
+    backgroundColor: "#f8fffc",
+    borderWidth: 5,
+    borderColor: "#e4fff3",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 6,
+    zIndex: 2,
+  },
+  binHandle: {
+    position: "absolute",
+    top: -16,
+    width: 54,
+    height: 20,
+    borderRadius: 12,
+    borderWidth: 5,
+    borderColor: "#f8fffc",
+    backgroundColor: "#8fd9bd",
+  },
+  binBody: {
+    width: 186,
+    height: 172,
+    borderBottomLeftRadius: 90,
+    borderBottomRightRadius: 90,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    backgroundColor: "#98dfc4",
+    borderWidth: 8,
+    borderColor: "#f7fffb",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    shadowColor: "#0f766e",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  binInnerGlow: {
+    position: "absolute",
+    top: 20,
+    left: 22,
+    right: 22,
+    height: 64,
+    borderRadius: 999,
+    backgroundColor: "#b7ecd6",
+    opacity: 0.65,
+  },
+  binBadge: {
+    width: 116,
+    height: 116,
+    borderRadius: 58,
+    backgroundColor: "#84d8b7",
+    borderWidth: 6,
+    borderColor: "#e9fff5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  starOrbit: {
+    position: "absolute",
+    width: 108,
+    height: 108,
+  },
+  orbitStar: {
+    position: "absolute",
+    color: "#eafff6",
+    fontWeight: "800",
+  },
+  orbitStarTop: {
+    top: 2,
+    left: 50,
+    fontSize: 16,
+  },
+  orbitStarRight: {
+    top: 46,
+    right: 2,
+    fontSize: 18,
+  },
+  orbitStarBottom: {
+    bottom: 2,
+    left: 50,
+    fontSize: 16,
+  },
+  orbitStarLeft: {
+    top: 46,
+    left: 2,
+    fontSize: 18,
+  },
+  coreStarWrap: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#edfff7",
+    borderWidth: 4,
+    borderColor: "#d2f7e8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coreStar: {
+    color: "#55b58d",
+    fontSize: 30,
+    marginTop: -1,
+  },
+  sparkle: {
+    position: "absolute",
+    backgroundColor: "#effff8",
+    borderRadius: 999,
+    opacity: 0.95,
+  },
+  sparkleLeft: {
+    width: 10,
+    height: 10,
+    left: 30,
+    top: 142,
+  },
+  sparkleMid: {
+    width: 12,
+    height: 12,
+    left: 22,
+    top: 164,
+  },
+  sparkleRight: {
+    width: 9,
+    height: 9,
+    left: 36,
+    top: 188,
   },
   tagline: {
     fontSize: 16,

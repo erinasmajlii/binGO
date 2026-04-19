@@ -1,13 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../../lib/supabase";
+import { getCaptureStats } from "../../lib/trashStats";
 
 export function HomeScreen() {
   const router = useRouter();
   const [username, setUsername] = useState("Guest");
+  const [statsUserKey, setStatsUserKey] = useState("guest");
+  const [streakDays, setStreakDays] = useState(0);
+  const [cleanupCount, setCleanupCount] = useState(0);
 
   useEffect(() => {
     if (!supabase) return;
@@ -20,11 +25,13 @@ export function HomeScreen() {
       if (!mounted) return;
 
       setUsername(user?.email ?? "Guest");
+      setStatsUserKey(user?.id || user?.email || "guest");
     })();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user;
       setUsername(user?.email ?? "Guest");
+      setStatsUserKey(user?.id || user?.email || "guest");
     });
 
     return () => {
@@ -32,6 +39,19 @@ export function HomeScreen() {
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      const load = async () => {
+        const stats = await getCaptureStats(statsUserKey);
+        setStreakDays(stats.streak);
+        setCleanupCount(stats.total);
+      };
+
+      load();
+      return () => {};
+    }, [statsUserKey])
+  );
 
   const userInitial = username.charAt(0).toUpperCase();
 
@@ -73,7 +93,7 @@ export function HomeScreen() {
               </View>
               <Text style={[styles.cardLabel, { color: "#ea580c" }]}>STREAK</Text>
             </View>
-            <Text style={styles.cardValue}>7 days</Text>
+            <Text style={styles.cardValue}>{streakDays} days</Text>
             <Text style={styles.cardSub}>Keep it going</Text>
           </View>
 
@@ -84,7 +104,7 @@ export function HomeScreen() {
               </View>
               <Text style={[styles.cardLabel, { color: "#2563eb" }]}>CLEANUPS</Text>
             </View>
-            <Text style={styles.cardValue}>50</Text>
+            <Text style={styles.cardValue}>{cleanupCount}</Text>
             <Text style={styles.cardSub}>Verified missions</Text>
           </View>
         </View>

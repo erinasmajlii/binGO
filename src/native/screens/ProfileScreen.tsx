@@ -1,9 +1,13 @@
-import { useEffect, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Animated, Image } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { checkSupabaseReachable, getSupabaseConfigIssue, supabase } from "../../lib/supabase";
+import { getCaptureStats } from "../../lib/trashStats";
+
+const XP_PER_LEVEL = 5000;
 
 export function ProfileScreen() {
   const router = useRouter();
@@ -13,6 +17,9 @@ export function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [username, setUsername] = useState("Guest");
+  const [statsUserKey, setStatsUserKey] = useState("guest");
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof getCaptureStats>> | null>(null);
+  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!supabase) return;
@@ -26,12 +33,14 @@ export function ProfileScreen() {
 
       setIsLoggedIn(Boolean(user));
       setUsername(user?.email ?? "Guest");
+      setStatsUserKey(user?.id || user?.email || "guest");
     })();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user;
       setIsLoggedIn(Boolean(user));
       setUsername(user?.email ?? "Guest");
+      setStatsUserKey(user?.id || user?.email || "guest");
     });
 
     return () => {
@@ -95,8 +104,49 @@ export function ProfileScreen() {
 
     setIsLoggedIn(false);
     setUsername("Guest");
+    setStatsUserKey("guest");
     setPassword("");
   };
+
+  const loadStats = useCallback(async () => {
+    const value = await getCaptureStats(statsUserKey);
+    setStats(value);
+  }, [statsUserKey]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadStats();
+    }, [loadStats])
+  );
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1400,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1400,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  const totalEcoXp = useMemo(() => stats?.totalPoints ?? 0, [stats?.totalPoints]);
+  const level = useMemo(() => Math.floor(totalEcoXp / XP_PER_LEVEL) + 1, [totalEcoXp]);
+  const xpIntoLevel = useMemo(() => totalEcoXp % XP_PER_LEVEL, [totalEcoXp]);
+  const xpRemaining = useMemo(() => XP_PER_LEVEL - xpIntoLevel, [xpIntoLevel]);
+  const levelProgress = useMemo(() => {
+    const progress = (xpIntoLevel / XP_PER_LEVEL) * 100;
+    return `${Math.round(progress)}%`;
+  }, [xpIntoLevel]);
 
   if (!isLoggedIn) {
     return (
@@ -159,12 +209,12 @@ export function ProfileScreen() {
 
           <View style={styles.xpBox}>
             <Text style={styles.xpLabel}>Total EcoXP</Text>
-            <Text style={styles.xpValue}>98,500</Text>
-            <Text style={styles.xpSub}>Level 7 • 110,000 needed for next level</Text>
+            <Text style={styles.xpValue}>{totalEcoXp.toLocaleString()}</Text>
+            <Text style={styles.xpSub}>Level {level} • {xpRemaining.toLocaleString()} needed for next level</Text>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: "90%" }]} />
+              <View style={[styles.progressFill, { width: levelProgress }]} />
             </View>
-            <Text style={styles.progressLabel}>90% to level 8</Text>
+            <Text style={styles.progressLabel}>{levelProgress} to level {level + 1}</Text>
           </View>
         </View>
 
@@ -176,10 +226,10 @@ export function ProfileScreen() {
           </View>
           <View style={styles.statsGrid}>
             {[
-              { icon: "camera-outline", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe", label: "PHOTOS", value: "128", sub: "Photos uploaded" },
-              { icon: "flash-outline", color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff", label: "RATE", value: "3.4", sub: "Daily rate" },
-              { icon: "trophy-outline", color: "#10b981", bg: "#ecfdf5", border: "#a7f3d0", label: "MISSIONS", value: "42", sub: "Missions" },
-              { icon: "flame-outline", color: "#f97316", bg: "#fff7ed", border: "#fed7aa", label: "STREAK", value: "7", sub: "Streak" },
+              { icon: "camera-outline", color: "#059669", bg: "#ecfdf5", border: "#a7f3d0", label: "PHOTOS", value: String(stats?.total ?? 0), sub: "Photos classified" },
+              { icon: "analytics-outline", color: "#0f766e", bg: "#f0fdfa", border: "#99f6e4", label: "RATE", value: String(stats?.weeklyRate ?? 0), sub: "Daily avg (7d)" },
+              { icon: "leaf-outline", color: "#047857", bg: "#dcfce7", border: "#86efac", label: "ECO XP", value: String(stats?.totalPoints ?? 0), sub: "Points from reports" },
+              { icon: "flame-outline", color: "#065f46", bg: "#ecfdf5", border: "#6ee7b7", label: "STREAK", value: String(stats?.streak ?? 0), sub: "Active days" },
             ].map((s, i) => (
               <View key={i} style={[styles.statCard, { backgroundColor: s.bg, borderColor: s.border }]}>
                 <View style={styles.statTop}>
@@ -191,6 +241,49 @@ export function ProfileScreen() {
               </View>
             ))}
           </View>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Ionicons name="layers-outline" size={20} color="#059669" />
+            <Text style={styles.cardTitle}>Waste Breakdown</Text>
+          </View>
+
+          {(stats?.breakdown ?? []).map((item, index) => (
+            <View key={item.category} style={[styles.rankRow, { backgroundColor: item.colors.bg, borderColor: item.colors.border }]}>
+              <Text style={styles.rankNumber}>{index + 1}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rankLabel, { color: item.colors.text }]}>{item.label}</Text>
+                <Text style={styles.rankSub}>{item.percent}% of your reports</Text>
+              </View>
+              <Text style={styles.rankCount}>{item.count}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Ionicons name="images-outline" size={20} color="#059669" />
+            <Text style={styles.cardTitle}>Recent Captures</Text>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photosRow}>
+            {(stats?.recentPhotos ?? []).map((photo, index) => {
+              const shift = pulse.interpolate({
+                inputRange: [0, 1],
+                outputRange: [index % 2 === 0 ? 0 : -4, index % 2 === 0 ? -4 : 0],
+              });
+
+              return (
+                <Animated.View key={photo.id} style={[styles.photoCard, { transform: [{ translateY: shift }] }]}>
+                  <Image source={{ uri: photo.uri }} style={styles.photoThumb} />
+                  <Text style={styles.photoLabel}>{photo.category}</Text>
+                </Animated.View>
+              );
+            })}
+          </ScrollView>
+
+          {(stats?.recentPhotos?.length ?? 0) === 0 ? <Text style={styles.emptyHint}>No photos yet. Capture trash from Report to populate this section.</Text> : null}
         </View>
 
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
@@ -227,7 +320,7 @@ const styles = StyleSheet.create({
   xpValue: { fontSize: 36, fontWeight: "700", color: "#059669", marginBottom: 4 },
   xpSub: { fontSize: 12, color: "#475569", marginBottom: 10 },
   progressBar: { height: 10, backgroundColor: "#d1fae5", borderRadius: 5, overflow: "hidden" },
-  progressFill: { height: "100%", backgroundColor: "#c084fc", borderRadius: 5 },
+  progressFill: { height: "100%", backgroundColor: "#10b981", borderRadius: 5 },
   progressLabel: { fontSize: 11, color: "#94a3b8", marginTop: 6 },
   cardHeaderRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 },
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#1e293b" },
@@ -237,6 +330,40 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 10, fontWeight: "600" },
   statValue: { fontSize: 22, fontWeight: "700", color: "#1e293b", marginBottom: 2 },
   statSub: { fontSize: 11, color: "#94a3b8" },
+  rankRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+    gap: 10,
+  },
+  rankNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    textAlign: "center",
+    lineHeight: 28,
+    backgroundColor: "#ffffff",
+    color: "#065f46",
+    fontWeight: "700",
+  },
+  rankLabel: { fontSize: 14, fontWeight: "700" },
+  rankSub: { color: "#64748b", fontSize: 12, marginTop: 2 },
+  rankCount: { fontSize: 22, fontWeight: "700", color: "#0f172a" },
+  photosRow: { gap: 10, paddingBottom: 2 },
+  photoCard: {
+    width: 104,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#a7f3d0",
+    backgroundColor: "#f0fdf4",
+    overflow: "hidden",
+  },
+  photoThumb: { width: "100%", height: 86, backgroundColor: "#dcfce7" },
+  photoLabel: { paddingVertical: 6, textAlign: "center", fontWeight: "600", color: "#065f46", fontSize: 11 },
+  emptyHint: { color: "#64748b", fontSize: 12 },
   logoutBtn: { backgroundColor: "#fee2e2", borderRadius: 12, paddingVertical: 14, alignItems: "center" },
   logoutText: { color: "#dc2626", fontWeight: "600", fontSize: 15 },
 });

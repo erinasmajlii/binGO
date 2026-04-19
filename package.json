@@ -8,6 +8,8 @@
     "start": "expo start",
     "start:go": "expo start --go --lan --clear",
     "start:go:tunnel": "expo start --go --tunnel --clear",
+    "ai:install": "pip install -r server/requirements.txt",
+    "ai:start": "python server/classifier_api.py",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"

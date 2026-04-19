@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -7,10 +7,14 @@ import { router } from "expo-router";
 import * as Location from "expo-location";
 import { BinMarker, loadBins } from "../../lib/bins";
 import { setActiveRoute } from "../../lib/route";
+import { CATEGORY_LABELS, saveCaptureRecord } from "../../lib/trashStats";
+import { classifyTrashPhotoWithModel } from "../../lib/trashClassifierApi";
 
 export function ReportScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
+  const [captureLabel, setCaptureLabel] = useState<string | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
 
   const toRadians = (value: number) => (value * Math.PI) / 180;
@@ -54,74 +58,108 @@ export function ReportScreen() {
       Alert.alert("Permission denied", "Camera permission is required to take photos.");
       return;
     }
+    setCapturedPhotoUri(null);
+    setCaptureLabel(null);
     setShowCamera(true);
   };
 
   const takePhoto = async () => {
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync();
-      setShowCamera(false);
+      setCapturedPhotoUri(photo.uri);
+      setCaptureLabel("Analyzing...");
 
-      const bins = await loadBins();
-      if (bins.length === 0) {
-        Alert.alert("Photo taken", `Photo saved at ${photo.uri}. Add at least one bin on the map to get directions.`);
+      let classified;
+      try {
+        classified = await classifyTrashPhotoWithModel(photo.uri);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        Alert.alert(
+          "AI classifier unavailable",
+          `Could not classify this image using the model API. ${message}`
+        );
+        setCapturedPhotoUri(null);
+        setCaptureLabel(null);
         return;
       }
 
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Photo taken", "Photo saved. Enable location to route to the nearest bin.");
-          return;
-        }
+      await saveCaptureRecord(photo.uri, classified.category, classified.confidence);
 
-        const current = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+      const detectionText = `${CATEGORY_LABELS[classified.category]} (${Math.round(classified.confidence * 100)}%)`;
+      setCaptureLabel(detectionText);
+      let statusText = `Detected ${detectionText}. Opening map...`;
 
-        const nearest = getNearestBin(bins, current.coords.latitude, current.coords.longitude);
-        if (!nearest) {
-          Alert.alert("Photo taken", "No bins found to route to.");
-          return;
-        }
+      let bins = await loadBins();
 
-        await setActiveRoute({
-          destination: nearest,
-          createdAt: Date.now(),
-        });
-
-        Alert.alert(
-          "Photo taken",
-          "Route to nearest bin is ready. Show route on map now?",
-          [
-            { text: "Not now", style: "cancel" },
-            {
-              text: "Open route",
-              onPress: () => {
-                router.push("/(tabs)/map");
-              },
-            },
-          ]
-        );
-      } catch {
-        Alert.alert("Photo taken", "Photo saved, but we could not calculate route to a bin.");
+      if (bins.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        bins = await loadBins();
       }
+
+      try {
+        if (bins.length === 0) {
+          statusText = `Detected ${detectionText}. No bins saved yet, but opening map.`;
+        } else {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== "granted") {
+            statusText = `Detected ${detectionText}. Enable location for nearest-bin routing.`;
+          } else {
+            const current = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+
+            const nearest = getNearestBin(bins, current.coords.latitude, current.coords.longitude);
+            if (nearest) {
+              await setActiveRoute({
+                destination: nearest,
+                createdAt: Date.now(),
+              });
+              statusText = `Detected ${detectionText}. Route to nearest bin is ready.`;
+            }
+          }
+        }
+      } catch {
+        statusText = `Detected ${detectionText}. Saved report, opening map.`;
+      }
+
+      setTimeout(() => {
+        setCapturedPhotoUri(null);
+        setCaptureLabel(null);
+        setShowCamera(false);
+        router.push("/(tabs)/map");
+      }, 1300);
     }
   };
 
   if (showCamera) {
     return (
       <View style={styles.cameraContainer}>
-        <CameraView 
-          style={styles.camera} 
-          ref={cameraRef} 
-          facing="back"
-        />
+        {capturedPhotoUri ? (
+          <Image source={{ uri: capturedPhotoUri }} style={styles.camera} />
+        ) : (
+          <CameraView 
+            style={styles.camera} 
+            ref={cameraRef} 
+            facing="back"
+          />
+        )}
+
+        {captureLabel ? (
+          <View style={styles.overlayBadge}>
+            <Ionicons name="sparkles" size={16} color="#ecfeff" />
+            <Text style={styles.overlayBadgeText}>{captureLabel}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.cameraControls}>
-          <TouchableOpacity style={styles.captureButton} onPress={takePhoto}>
+          <TouchableOpacity style={[styles.captureButton, capturedPhotoUri ? styles.captureButtonDisabled : null]} onPress={takePhoto} disabled={Boolean(capturedPhotoUri)}>
             <Ionicons name="camera" size={30} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.closeButton} onPress={() => setShowCamera(false)}>
+          <TouchableOpacity style={styles.closeButton} onPress={() => {
+            setCapturedPhotoUri(null);
+            setCaptureLabel(null);
+            setShowCamera(false);
+          }}>
             <Ionicons name="close" size={30} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -199,6 +237,26 @@ const styles = StyleSheet.create({
   tipText: { color: "#475569", fontSize: 14, flex: 1, lineHeight: 20 },
   cameraContainer: { flex: 1, position: "relative" },
   camera: { flex: 1 },
+  overlayBadge: {
+    position: "absolute",
+    top: 58,
+    left: 16,
+    right: 16,
+    borderRadius: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(6,95,70,0.88)",
+    borderWidth: 1,
+    borderColor: "#6ee7b7",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  overlayBadgeText: {
+    color: "#ecfeff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
   cameraControls: {
     position: "absolute",
     bottom: 50,
@@ -216,6 +274,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginHorizontal: 20,
+  },
+  captureButtonDisabled: {
+    opacity: 0.65,
   },
   closeButton: {
     position: "absolute",
