@@ -7,7 +7,7 @@ import { router } from "expo-router";
 import * as Location from "expo-location";
 import { BinMarker, loadBins } from "../../lib/bins";
 import { setActiveRoute } from "../../lib/route";
-import { CATEGORY_LABELS, saveCaptureRecord } from "../../lib/trashStats";
+import { CATEGORY_LABELS, classifyTrashPhoto, saveCaptureRecord } from "../../lib/trashStats";
 import { classifyTrashPhotoWithModel } from "../../lib/trashClassifierApi";
 
 export function ReportScreen() {
@@ -74,13 +74,21 @@ export function ReportScreen() {
         classified = await classifyTrashPhotoWithModel(photo.uri);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        Alert.alert(
-          "AI classifier unavailable",
-          `Could not classify this image using the model API. ${message}`
-        );
-        setCapturedPhotoUri(null);
-        setCaptureLabel(null);
-        return;
+        try {
+          classified = await classifyTrashPhoto(photo.uri);
+          Alert.alert(
+            "AI classifier unavailable",
+            `Model API is not reachable right now (${message}). Used fallback classification so your report still saves.`
+          );
+        } catch {
+          Alert.alert(
+            "Classification failed",
+            `Could not classify this image. ${message}`
+          );
+          setCapturedPhotoUri(null);
+          setCaptureLabel(null);
+          return;
+        }
       }
 
       await saveCaptureRecord(photo.uri, classified.category, classified.confidence);
