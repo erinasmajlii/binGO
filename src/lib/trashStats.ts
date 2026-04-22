@@ -12,6 +12,12 @@ export type CaptureRecord = {
   points: number;
 };
 
+export type LeaderboardEntry = {
+  rank: number;
+  name: string;
+  score: number;
+};
+
 const STORAGE_KEY_PREFIX = "bingo:capture-records:v2";
 
 const DATASET_COUNTS: Record<TrashCategory, number> = {
@@ -114,6 +120,48 @@ async function writeRecordsForUser(records: CaptureRecord[], userKey?: string): 
   await AsyncStorage.setItem(storageKey, JSON.stringify(records));
 }
 
+async function getCurrentUserIdentity() {
+  if (!supabase) return null;
+
+  try {
+    const { data } = await supabase.auth.getSession();
+    const user = data.session?.user;
+    if (!user) return null;
+
+    const displayNameFromMeta = user.user_metadata?.name;
+    const displayNameFromEmail = user.email?.split("@")[0];
+    const displayName = String(displayNameFromMeta || displayNameFromEmail || "User").trim() || "User";
+
+    return {
+      id: user.id,
+      displayName,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function syncLeaderboardScore(totalPoints: number): Promise<void> {
+  if (!supabase) return;
+
+  const identity = await getCurrentUserIdentity();
+  if (!identity) return;
+
+  try {
+    await supabase.from("leaderboard_scores").upsert(
+      {
+        user_id: identity.id,
+        display_name: identity.displayName,
+        total_points: totalPoints,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+  } catch {
+    // Keep local flow resilient when leaderboard sync fails.
+  }
+}
+
 export async function classifyTrashPhoto(uri: string): Promise<{ category: TrashCategory; confidence: number }> {
   const inferred = inferCategoryFromUri(uri);
   if (inferred) {
@@ -142,9 +190,38 @@ export async function saveCaptureRecord(uri: string, category: TrashCategory, co
   const records = await readRecordsForUser(userKey);
   records.unshift(record);
 
-  await writeRecordsForUser(records.slice(0, 300), userKey);
+  const trimmedRecords = records.slice(0, 300);
+  await writeRecordsForUser(trimmedRecords, userKey);
+  const totalPoints = trimmedRecords.reduce((sum, item) => sum + item.points, 0);
+  await syncLeaderboardScore(totalPoints);
 
   return record;
+}
+
+export async function getGlobalLeaderboard(limit = 20): Promise<LeaderboardEntry[]> {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from("leaderboard_scores")
+      .select("display_name,total_points")
+      .order("total_points", { ascending: false })
+      .limit(limit);
+
+    if (error || !Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((row, index) => ({
+        rank: index + 1,
+        name: String((row as any).display_name || "User"),
+        score: Number((row as any).total_points || 0),
+      }))
+      .filter((row) => row.score >= 0);
+  } catch {
+    return [];
+  }
 }
 
 function calculateStreak(records: CaptureRecord[]): number {

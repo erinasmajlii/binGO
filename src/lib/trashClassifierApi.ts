@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import { classifyTrashPhoto } from "./trashStats";
 import { TrashCategory } from "./trashStats";
 
 const ALLOWED_CATEGORIES = new Set<TrashCategory>(["cardboard", "glass", "metal", "paper", "plastic", "trash"]);
@@ -9,20 +10,26 @@ type ClassifierResponse = {
   confidence: number;
 };
 
-const CLASSIFIER_TIMEOUT_MS = 7000;
+const CLASSIFIER_TIMEOUT_MS = 2500;
+
+let lastWorkingBaseUrl: string | null = null;
 
 function getApiBaseUrlCandidates(): string[] {
   const candidates: string[] = [];
 
-  const envUrl = process.env.EXPO_PUBLIC_CLASSIFIER_API_URL?.trim();
-  if (envUrl) {
-    candidates.push(envUrl.replace(/\/$/, ""));
+  if (lastWorkingBaseUrl) {
+    candidates.push(lastWorkingBaseUrl);
   }
 
   const hostUri = (Constants.expoConfig as any)?.hostUri as string | undefined;
   const host = hostUri?.split(":")[0];
   if (host) {
     candidates.push(`http://${host}:8000`);
+  }
+
+  const envUrl = process.env.EXPO_PUBLIC_CLASSIFIER_API_URL?.trim();
+  if (envUrl) {
+    candidates.push(envUrl.replace(/\/$/, ""));
   }
 
   if (Platform.OS === "android") {
@@ -46,7 +53,6 @@ function buildImageFormData(photoUri: string): FormData {
 
 export async function classifyTrashPhotoWithModel(photoUri: string): Promise<{ category: TrashCategory; confidence: number }> {
   const baseUrls = getApiBaseUrlCandidates();
-  const failures: string[] = [];
 
   for (const baseUrl of baseUrls) {
     const controller = new AbortController();
@@ -60,8 +66,6 @@ export async function classifyTrashPhotoWithModel(photoUri: string): Promise<{ c
       });
 
       if (!response.ok) {
-        const detail = await response.text();
-        failures.push(`${baseUrl}: ${detail || `HTTP ${response.status}`}`);
         continue;
       }
 
@@ -69,24 +73,22 @@ export async function classifyTrashPhotoWithModel(photoUri: string): Promise<{ c
       const category = String(result.category || "trash").toLowerCase() as TrashCategory;
 
       if (!ALLOWED_CATEGORIES.has(category)) {
-        failures.push(`${baseUrl}: Unexpected category ${result.category}`);
         continue;
       }
+
+      lastWorkingBaseUrl = baseUrl;
 
       return {
         category,
         confidence: Number(Math.max(0, Math.min(1, result.confidence ?? 0.5)).toFixed(4)),
       };
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        failures.push(`${baseUrl}: timed out after ${Math.round(CLASSIFIER_TIMEOUT_MS / 1000)}s`);
-      } else {
-        failures.push(`${baseUrl}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      // Try the next candidate quickly when one endpoint is unreachable.
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  throw new Error(`Classifier API is unreachable. Tried: ${failures.join(" | ")}`);
+  const fallback = await classifyTrashPhoto(photoUri);
+  return fallback;
 }

@@ -29,3 +29,13 @@ yarn-error.log*
 # system files
 .DS_Store
 Thumbs.db
+
+# large datasets and model files
+server/taco-dataset/
+server/models/
+server/sql/
+server/train_taco_classifier.py
+temp_download.py
+qr-github.png
+*.pyc
+__pycache__/

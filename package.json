@@ -9,6 +9,7 @@
     "start:go": "expo start --go --lan --clear",
     "start:go:tunnel": "expo start --go --tunnel --clear",
     "ai:install": "pip install -r server/requirements.txt",
+    "ai:train:taco": "python server/train_taco_classifier.py --dataset-root ./server/taco-dataset",
     "ai:start": "python server/classifier_api.py",
     "dev": "vite",
     "build": "vite build",

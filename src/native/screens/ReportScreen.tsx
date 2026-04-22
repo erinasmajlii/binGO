@@ -72,28 +72,13 @@ export function ReportScreen() {
       let classified;
       try {
         classified = await classifyTrashPhotoWithModel(photo.uri);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        try {
-          classified = await classifyTrashPhoto(photo.uri);
-          Alert.alert(
-            "AI classifier unavailable",
-            `Model API is not reachable right now (${message}). Used fallback classification so your report still saves.`
-          );
-        } catch {
-          Alert.alert(
-            "Classification failed",
-            `Could not classify this image. ${message}`
-          );
-          setCapturedPhotoUri(null);
-          setCaptureLabel(null);
-          return;
-        }
+      } catch {
+        classified = await classifyTrashPhoto(photo.uri);
       }
 
       await saveCaptureRecord(photo.uri, classified.category, classified.confidence);
 
-      const detectionText = `${CATEGORY_LABELS[classified.category]} (${Math.round(classified.confidence * 100)}%)`;
+      const detectionText = CATEGORY_LABELS[classified.category];
       setCaptureLabel(detectionText);
       let statusText = `Detected ${detectionText}. Opening map...`;
 

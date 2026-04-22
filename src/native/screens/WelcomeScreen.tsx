@@ -1,6 +1,21 @@
 import { useEffect, useRef } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from "react-native";
 import { router } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+
+type RecycleIconProps = {
+  size: number;
+  color: string;
+  spin: Animated.AnimatedInterpolation<string>;
+};
+
+function RecycleIcon({ size, color, spin }: RecycleIconProps) {
+  return (
+    <Animated.View style={[styles.recycleIcon, { transform: [{ rotate: spin }] }]}>
+      <MaterialCommunityIcons name="recycle" size={size} color={color} />
+    </Animated.View>
+  );
+}
 
 function TrashCanHero() {
   const spin = useRef(new Animated.Value(0)).current;
@@ -9,17 +24,28 @@ function TrashCanHero() {
     const loop = Animated.loop(
       Animated.timing(spin, {
         toValue: 1,
-        duration: 4600,
+        duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
       })
     );
 
     loop.start();
-    return () => loop.stop();
+
+    return () => {
+      loop.stop();
+    };
   }, [spin]);
 
-  const spinInterpolate = spin.interpolate({
+  const ringSpinInterpolate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+  const reverseRingSpinInterpolate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "-360deg"],
+  });
+  const iconSpinInterpolate = spin.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
@@ -29,29 +55,30 @@ function TrashCanHero() {
       <View style={styles.binShadow} />
 
       <View style={styles.binLid}>
+        <View style={styles.binLidLip} />
         <View style={styles.binHandle} />
       </View>
 
       <View style={styles.binBody}>
         <View style={styles.binInnerGlow} />
+        <View style={styles.binRib1} />
+        <View style={styles.binRib2} />
+        <View style={styles.binRib3} />
+        <View style={styles.binBase} />
 
         <View style={styles.binBadge}>
-          <Animated.View style={[styles.starOrbit, { transform: [{ rotate: spinInterpolate }] }]}>
-            <Text style={[styles.orbitStar, styles.orbitStarTop]}>✦</Text>
-            <Text style={[styles.orbitStar, styles.orbitStarRight]}>•</Text>
-            <Text style={[styles.orbitStar, styles.orbitStarBottom]}>✦</Text>
-            <Text style={[styles.orbitStar, styles.orbitStarLeft]}>•</Text>
-          </Animated.View>
+          <Animated.View style={[styles.badgeRingOuter, { transform: [{ rotate: ringSpinInterpolate }] }]} />
+          <Animated.View style={[styles.badgeRingInner, { transform: [{ rotate: reverseRingSpinInterpolate }] }]} />
 
-          <View style={styles.coreStarWrap}>
-            <Text style={styles.coreStar}>★</Text>
+          <View style={styles.coreIconWrap}>
+            <RecycleIcon size={66} color="#16a34a" spin={iconSpinInterpolate} />
           </View>
         </View>
       </View>
 
-      <View style={[styles.sparkle, styles.sparkleLeft]} />
-      <View style={[styles.sparkle, styles.sparkleMid]} />
-      <View style={[styles.sparkle, styles.sparkleRight]} />
+      <View style={styles.binWheelLeft} />
+      <View style={styles.binWheelRight} />
+
     </View>
   );
 }
@@ -121,142 +148,174 @@ const styles = StyleSheet.create({
   },
   binShadow: {
     position: "absolute",
-    bottom: 16,
-    width: 132,
-    height: 22,
+    bottom: 8,
+    width: 156,
+    height: 18,
     borderRadius: 999,
-    backgroundColor: "#7dd3af",
-    opacity: 0.35,
+    backgroundColor: "#34d399",
+    opacity: 0.23,
   },
   binLid: {
-    width: 150,
-    height: 34,
-    borderRadius: 14,
-    backgroundColor: "#f8fffc",
-    borderWidth: 5,
-    borderColor: "#e4fff3",
+    width: 164,
+    height: 30,
+    borderRadius: 12,
+    backgroundColor: "#ecfdf5",
+    borderWidth: 3,
+    borderColor: "#a7f3d0",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 3,
     zIndex: 2,
+  },
+  binLidLip: {
+    position: "absolute",
+    bottom: -5,
+    width: 146,
+    height: 8,
+    borderRadius: 8,
+    backgroundColor: "#34d399",
   },
   binHandle: {
     position: "absolute",
-    top: -16,
+    top: -11,
     width: 54,
-    height: 20,
-    borderRadius: 12,
-    borderWidth: 5,
-    borderColor: "#f8fffc",
-    backgroundColor: "#8fd9bd",
+    height: 10,
+    borderRadius: 7,
+    backgroundColor: "#10b981",
   },
   binBody: {
-    width: 186,
-    height: 172,
-    borderBottomLeftRadius: 90,
-    borderBottomRightRadius: 90,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    backgroundColor: "#98dfc4",
-    borderWidth: 8,
-    borderColor: "#f7fffb",
+    width: 168,
+    height: 176,
+    borderBottomLeftRadius: 42,
+    borderBottomRightRadius: 42,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    backgroundColor: "#34d399",
+    borderWidth: 5,
+    borderColor: "#d1fae5",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    shadowColor: "#0f766e",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.16,
-    shadowRadius: 14,
-    elevation: 8,
+    shadowColor: "#047857",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 7,
   },
   binInnerGlow: {
     position: "absolute",
-    top: 20,
-    left: 22,
-    right: 22,
-    height: 64,
+    top: 10,
+    left: 14,
+    right: 14,
+    height: 54,
+    borderRadius: 14,
+    backgroundColor: "#6ee7b7",
+    opacity: 0.5,
+  },
+  binRib1: {
+    position: "absolute",
+    top: 38,
+    width: 7,
+    height: 122,
     borderRadius: 999,
-    backgroundColor: "#b7ecd6",
-    opacity: 0.65,
+    backgroundColor: "#10b981",
+    opacity: 0.35,
+  },
+  binRib2: {
+    position: "absolute",
+    top: 38,
+    left: 46,
+    width: 6,
+    height: 122,
+    borderRadius: 999,
+    backgroundColor: "#10b981",
+    opacity: 0.3,
+  },
+  binRib3: {
+    position: "absolute",
+    top: 38,
+    right: 46,
+    width: 6,
+    height: 122,
+    borderRadius: 999,
+    backgroundColor: "#10b981",
+    opacity: 0.3,
+  },
+  binBase: {
+    position: "absolute",
+    bottom: 5,
+    width: 122,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: "#bbf7d0",
+    opacity: 0.75,
   },
   binBadge: {
-    width: 116,
-    height: 116,
-    borderRadius: 58,
-    backgroundColor: "#84d8b7",
-    borderWidth: 6,
-    borderColor: "#e9fff5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  starOrbit: {
-    position: "absolute",
-    width: 108,
-    height: 108,
-  },
-  orbitStar: {
-    position: "absolute",
-    color: "#eafff6",
-    fontWeight: "800",
-  },
-  orbitStarTop: {
-    top: 2,
-    left: 50,
-    fontSize: 16,
-  },
-  orbitStarRight: {
-    top: 46,
-    right: 2,
-    fontSize: 18,
-  },
-  orbitStarBottom: {
-    bottom: 2,
-    left: 50,
-    fontSize: 16,
-  },
-  orbitStarLeft: {
-    top: 46,
-    left: 2,
-    fontSize: 18,
-  },
-  coreStarWrap: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: "#edfff7",
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#ecfdf5",
     borderWidth: 4,
-    borderColor: "#d2f7e8",
+    borderColor: "#a7f3d0",
     alignItems: "center",
     justifyContent: "center",
   },
-  coreStar: {
-    color: "#55b58d",
-    fontSize: 30,
-    marginTop: -1,
-  },
-  sparkle: {
+  badgeRingOuter: {
     position: "absolute",
-    backgroundColor: "#effff8",
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 7,
+    borderColor: "#22c55e",
+    borderTopColor: "#15803d",
+    borderRightColor: "#16a34a",
+  },
+  badgeRingInner: {
+    position: "absolute",
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    borderWidth: 4,
+    borderColor: "#bbf7d0",
+    borderTopColor: "#d9fbe6",
+  },
+  coreIconWrap: {
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 2,
+    borderColor: "#dcfce7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recycleIcon: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  binWheelLeft: {
+    position: "absolute",
+    bottom: 6,
+    left: 63,
+    width: 16,
+    height: 16,
     borderRadius: 999,
-    opacity: 0.95,
+    backgroundColor: "#065f46",
+    borderWidth: 2,
+    borderColor: "#6ee7b7",
   },
-  sparkleLeft: {
-    width: 10,
-    height: 10,
-    left: 30,
-    top: 142,
-  },
-  sparkleMid: {
-    width: 12,
-    height: 12,
-    left: 22,
-    top: 164,
-  },
-  sparkleRight: {
-    width: 9,
-    height: 9,
-    left: 36,
-    top: 188,
+  binWheelRight: {
+    position: "absolute",
+    bottom: 6,
+    right: 63,
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    backgroundColor: "#065f46",
+    borderWidth: 2,
+    borderColor: "#6ee7b7",
   },
   tagline: {
     fontSize: 16,

@@ -1,6 +1,9 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { useCallback, useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
+import { getGlobalLeaderboard, LeaderboardEntry } from "../../lib/trashStats";
 
 const dailyMissions = [
   { title: "Spot & report 1 trash pile", description: "Capture one clear photo of litter in your area.", reward: "+120 EcoXP" },
@@ -8,12 +11,6 @@ const dailyMissions = [
 const weeklyMissions = [
   { title: "5 verified cleanups", description: "Complete five verified cleanup missions this week.", reward: "+1,200 EcoXP" },
 ];
-const leaderboard = [
-  { rank: 1, name: "Aylin", score: 1420 },
-  { rank: 2, name: "Mert", score: 1280 },
-  { rank: 3, name: "Kenan", score: 1190 },
-];
-
 const rankStyle = (rank: number) => {
   if (rank === 1) return { bg: "#fef3c7", border: "#fde68a" };
   if (rank === 2) return { bg: "#f1f5f9", border: "#e2e8f0" };
@@ -21,6 +18,22 @@ const rankStyle = (rank: number) => {
 };
 
 export function MissionsScreen() {
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
+
+  const loadLeaderboard = useCallback(async () => {
+    setLoadingLeaderboard(true);
+    const rows = await getGlobalLeaderboard(20);
+    setLeaderboard(rows);
+    setLoadingLeaderboard(false);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadLeaderboard();
+    }, [loadLeaderboard])
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -82,16 +95,27 @@ export function MissionsScreen() {
             <Text style={styles.cardTitle}>Leaderboards</Text>
           </View>
           <Text style={[styles.missionTitle, { color: "#059669", marginTop: 12, marginBottom: 8 }]}>Daily</Text>
-          {leaderboard.map((e) => {
-            const s = rankStyle(e.rank);
-            return (
-              <View key={e.rank} style={[styles.leaderRow, { backgroundColor: s.bg, borderColor: s.border }]}>
-                <Text style={styles.rankNum}>#{e.rank}</Text>
-                <Text style={styles.rankName}>{e.name}</Text>
-                <Text style={styles.rankScore}>{e.score.toLocaleString()}</Text>
-              </View>
-            );
-          })}
+          {loadingLeaderboard ? (
+            <View style={styles.leaderboardStateRow}>
+              <ActivityIndicator size="small" color="#059669" />
+              <Text style={styles.leaderboardStateText}>Loading leaderboard...</Text>
+            </View>
+          ) : leaderboard.length === 0 ? (
+            <View style={styles.leaderboardStateRow}>
+              <Text style={styles.leaderboardStateText}>No player scores yet. Add reports to appear here.</Text>
+            </View>
+          ) : (
+            leaderboard.map((e) => {
+              const s = rankStyle(e.rank);
+              return (
+                <View key={`${e.rank}-${e.name}`} style={[styles.leaderRow, { backgroundColor: s.bg, borderColor: s.border }]}>
+                  <Text style={styles.rankNum}>#{e.rank}</Text>
+                  <Text style={styles.rankName}>{e.name}</Text>
+                  <Text style={styles.rankScore}>{e.score.toLocaleString()}</Text>
+                </View>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -115,6 +139,8 @@ const styles = StyleSheet.create({
   rewardBadge: { backgroundColor: "#10b981", paddingHorizontal: 10, paddingVertical: 3, borderRadius: 99 },
   rewardText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   missionDesc: { color: "#475569", fontSize: 12, lineHeight: 18 },
+  leaderboardStateRow: { paddingVertical: 12, alignItems: "center", justifyContent: "center", gap: 8 },
+  leaderboardStateText: { color: "#64748b", fontSize: 13, textAlign: "center" },
   leaderRow: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
   rankNum: { fontWeight: "700", fontSize: 16, color: "#475569", width: 36 },
   rankName: { flex: 1, fontWeight: "600", color: "#1e293b", fontSize: 14 },
