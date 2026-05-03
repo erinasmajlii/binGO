@@ -9,10 +9,12 @@ import {
   Switch,
   ActivityIndicator,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { checkSupabaseReachable, getSupabaseConfigIssue, supabase } from "../../lib/supabase";
 
 export function RegisterScreen() {
+  const insets = useSafeAreaInsets();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -104,7 +106,7 @@ export function RegisterScreen() {
       <View style={[styles.circle, { top: -60, left: -60, width: 180, height: 180, backgroundColor: "#a7f3d0" }]} />
       <View style={[styles.circle, { bottom: -60, right: -60, width: 200, height: 200, backgroundColor: "#a7f3d0" }]} />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(12, insets.top) }] }>
         <Text style={styles.subtitle}>Welcome to</Text>
         <Text style={styles.title}>
           bin<Text style={styles.titleBold}>Go</Text>

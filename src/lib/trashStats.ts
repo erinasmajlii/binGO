@@ -1,7 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 
-export type TrashCategory = "cardboard" | "glass" | "metal" | "paper" | "plastic" | "trash";
+export type TrashCategory =
+  | "cardboard"
+  | "glass"
+  | "metal"
+  | "paper"
+  | "plastic"
+  | "trash";
 
 export type CaptureRecord = {
   id: string;
@@ -19,6 +25,14 @@ export type LeaderboardEntry = {
 };
 
 const STORAGE_KEY_PREFIX = "bingo:capture-records:v2";
+const MISSION_BONUS_STORAGE_KEY_PREFIX = "bingo:mission-bonus:v1";
+
+// Static NPC players for leaderboard benchmarks
+const NPC_PLAYERS: LeaderboardEntry[] = [
+  { rank: 0, name: "Erina", score: 289200 },
+  { rank: 0, name: "Art", score: 253000 },
+  { rank: 0, name: "Kenan", score: 250000 },
+];
 
 const DATASET_COUNTS: Record<TrashCategory, number> = {
   cardboard: 403,
@@ -38,7 +52,10 @@ export const CATEGORY_LABELS: Record<TrashCategory, string> = {
   trash: "General Trash",
 };
 
-export const CATEGORY_COLORS: Record<TrashCategory, { text: string; bg: string; border: string }> = {
+export const CATEGORY_COLORS: Record<
+  TrashCategory,
+  { text: string; bg: string; border: string }
+> = {
   cardboard: { text: "#b45309", bg: "#fffbeb", border: "#fde68a" },
   glass: { text: "#0284c7", bg: "#f0f9ff", border: "#bae6fd" },
   metal: { text: "#475569", bg: "#f8fafc", border: "#cbd5e1" },
@@ -54,7 +71,10 @@ function toConfidence(value: number): number {
 }
 
 function pickWeightedCategory(): TrashCategory {
-  const total = CATEGORIES.reduce((sum, category) => sum + DATASET_COUNTS[category], 0);
+  const total = CATEGORIES.reduce(
+    (sum, category) => sum + DATASET_COUNTS[category],
+    0,
+  );
   let threshold = Math.random() * total;
 
   for (const category of CATEGORIES) {
@@ -76,7 +96,10 @@ function inferCategoryFromUri(uri: string): TrashCategory | null {
 }
 
 function normalizeKeyPart(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "_");
 }
 
 async function getStorageKey(userKey?: string): Promise<string> {
@@ -109,15 +132,65 @@ async function readRecordsForUser(userKey?: string): Promise<CaptureRecord[]> {
     const parsed = JSON.parse(raw) as CaptureRecord[];
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.filter((record) => Boolean(record?.id && record?.uri && record?.category));
+    return parsed.filter((record) =>
+      Boolean(record?.id && record?.uri && record?.category),
+    );
   } catch {
     return [];
   }
 }
 
-async function writeRecordsForUser(records: CaptureRecord[], userKey?: string): Promise<void> {
+async function writeRecordsForUser(
+  records: CaptureRecord[],
+  userKey?: string,
+): Promise<void> {
   const storageKey = await getStorageKey(userKey);
   await AsyncStorage.setItem(storageKey, JSON.stringify(records));
+}
+
+async function getMissionBonusStorageKey(userKey?: string): Promise<string> {
+  if (userKey && userKey.trim()) {
+    return `${MISSION_BONUS_STORAGE_KEY_PREFIX}:${normalizeKeyPart(userKey)}`;
+  }
+
+  if (supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      const candidate = user?.id || user?.email;
+      if (candidate) {
+        return `${MISSION_BONUS_STORAGE_KEY_PREFIX}:${normalizeKeyPart(candidate)}`;
+      }
+    } catch {
+      // Fallback to guest key when session lookup fails.
+    }
+  }
+
+  return `${MISSION_BONUS_STORAGE_KEY_PREFIX}:guest`;
+}
+
+async function readMissionBonusPoints(userKey?: string): Promise<number> {
+  const storageKey = await getMissionBonusStorageKey(userKey);
+  try {
+    const raw = await AsyncStorage.getItem(storageKey);
+    if (!raw) return 0;
+
+    const parsed = JSON.parse(raw) as { points?: number };
+    return Number(parsed?.points || 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function writeMissionBonusPoints(
+  points: number,
+  userKey?: string,
+): Promise<void> {
+  const storageKey = await getMissionBonusStorageKey(userKey);
+  await AsyncStorage.setItem(
+    storageKey,
+    JSON.stringify({ points, updatedAt: Date.now() }),
+  );
 }
 
 async function getCurrentUserIdentity() {
@@ -130,7 +203,9 @@ async function getCurrentUserIdentity() {
 
     const displayNameFromMeta = user.user_metadata?.name;
     const displayNameFromEmail = user.email?.split("@")[0];
-    const displayName = String(displayNameFromMeta || displayNameFromEmail || "User").trim() || "User";
+    const displayName =
+      String(displayNameFromMeta || displayNameFromEmail || "User").trim() ||
+      "User";
 
     return {
       id: user.id,
@@ -141,28 +216,36 @@ async function getCurrentUserIdentity() {
   }
 }
 
-async function syncLeaderboardScore(totalPoints: number): Promise<void> {
+async function syncCurrentUserLeaderboardScore(
+  userKey?: string,
+): Promise<void> {
   if (!supabase) return;
 
   const identity = await getCurrentUserIdentity();
   if (!identity) return;
+
+  const records = await readRecordsForUser(userKey);
+  const missionBonusPoints = await readMissionBonusPoints(userKey);
+  const capturePoints = records.reduce((sum, item) => sum + item.points, 0);
 
   try {
     await supabase.from("leaderboard_scores").upsert(
       {
         user_id: identity.id,
         display_name: identity.displayName,
-        total_points: totalPoints,
+        total_points: capturePoints + missionBonusPoints,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "user_id" }
+      { onConflict: "user_id" },
     );
   } catch {
     // Keep local flow resilient when leaderboard sync fails.
   }
 }
 
-export async function classifyTrashPhoto(uri: string): Promise<{ category: TrashCategory; confidence: number }> {
+export async function classifyTrashPhoto(
+  uri: string,
+): Promise<{ category: TrashCategory; confidence: number }> {
   const inferred = inferCategoryFromUri(uri);
   if (inferred) {
     return {
@@ -177,7 +260,12 @@ export async function classifyTrashPhoto(uri: string): Promise<{ category: Trash
   };
 }
 
-export async function saveCaptureRecord(uri: string, category: TrashCategory, confidence: number, userKey?: string): Promise<CaptureRecord> {
+export async function saveCaptureRecord(
+  uri: string,
+  category: TrashCategory,
+  confidence: number,
+  userKey?: string,
+): Promise<CaptureRecord> {
   const record: CaptureRecord = {
     id: `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`,
     uri,
@@ -192,35 +280,82 @@ export async function saveCaptureRecord(uri: string, category: TrashCategory, co
 
   const trimmedRecords = records.slice(0, 300);
   await writeRecordsForUser(trimmedRecords, userKey);
-  const totalPoints = trimmedRecords.reduce((sum, item) => sum + item.points, 0);
-  await syncLeaderboardScore(totalPoints);
+  await syncCurrentUserLeaderboardScore(userKey);
 
   return record;
 }
 
-export async function getGlobalLeaderboard(limit = 20): Promise<LeaderboardEntry[]> {
-  if (!supabase) return [];
+export async function awardMissionXp(
+  points: number,
+  userKey?: string,
+): Promise<number> {
+  const current = await readMissionBonusPoints(userKey);
+  const updated = current + Math.max(0, Number(points) || 0);
+  await writeMissionBonusPoints(updated, userKey);
+  await syncCurrentUserLeaderboardScore(userKey);
+  return updated;
+}
+
+export async function getGlobalLeaderboard(
+  limit = 20,
+): Promise<LeaderboardEntry[]> {
+  if (!supabase) {
+    // If no Supabase, return only NPCs with proper ranking
+    const sorted = [...NPC_PLAYERS].sort((a, b) => b.score - a.score);
+    return sorted.slice(0, limit).map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }));
+  }
 
   try {
     const { data, error } = await supabase
       .from("leaderboard_scores")
       .select("display_name,total_points")
       .order("total_points", { ascending: false })
-      .limit(limit);
+      .limit(limit * 2); // Fetch extra to account for NPCs
 
     if (error || !Array.isArray(data)) {
-      return [];
+      // If fetch fails, return only NPCs with proper ranking
+      const sorted = [...NPC_PLAYERS].sort((a, b) => b.score - a.score);
+      return sorted.slice(0, limit).map((entry, index) => ({
+        ...entry,
+        rank: index + 1,
+      }));
     }
 
-    return data
-      .map((row, index) => ({
-        rank: index + 1,
+    // Convert real users to LeaderboardEntry format
+    const realUsers = data
+      .map((row) => ({
+        rank: 0, // Will be set after sorting
         name: String((row as any).display_name || "User"),
         score: Number((row as any).total_points || 0),
       }))
       .filter((row) => row.score >= 0);
+
+    // Combine real users with NPC players
+    const combinedList = [...realUsers, ...NPC_PLAYERS];
+
+    // Sort by score descending, then by name for stable ordering
+    const sorted = combinedList.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    // Add proper ranking and return top N
+    return sorted.slice(0, limit).map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }));
   } catch {
-    return [];
+    // On any error, return NPCs with proper ranking
+    const sorted = [...NPC_PLAYERS].sort((a, b) => b.score - a.score);
+    return sorted.slice(0, limit).map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }));
   }
 }
 
@@ -231,7 +366,7 @@ function calculateStreak(records: CaptureRecord[]): number {
     records.map((record) => {
       const date = new Date(record.createdAt);
       return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-    })
+    }),
   );
 
   let streak = 0;
@@ -250,10 +385,40 @@ function calculateStreak(records: CaptureRecord[]): number {
 export async function getCaptureStats(userKey?: string) {
   const records = await readRecordsForUser(userKey);
   const total = records.length;
-  const totalPoints = records.reduce((sum, record) => sum + record.points, 0);
+  const capturePoints = records.reduce((sum, record) => sum + record.points, 0);
+  const missionBonusPoints = await readMissionBonusPoints(userKey);
+  const totalPoints = capturePoints + missionBonusPoints;
+
+  const now = new Date();
+  const startOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
+  ).getTime();
+  const startOfWeek = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - now.getDay(),
+    0,
+    0,
+    0,
+    0,
+  ).getTime();
+  const todayCount = records.filter(
+    (record) => record.createdAt >= startOfDay,
+  ).length;
+  const weekCount = records.filter(
+    (record) => record.createdAt >= startOfWeek,
+  ).length;
 
   const breakdown = CATEGORIES.map((category) => {
-    const count = records.filter((record) => record.category === category).length;
+    const count = records.filter(
+      (record) => record.category === category,
+    ).length;
     const percent = total > 0 ? Math.round((count / total) * 100) : 0;
 
     return {
@@ -265,11 +430,13 @@ export async function getCaptureStats(userKey?: string) {
     };
   }).sort((a, b) => b.count - a.count);
 
-  const lastWeek = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const recent = records.filter((record) => record.createdAt >= lastWeek);
+  const recent = records.filter((record) => record.createdAt >= startOfWeek);
 
   return {
     total,
+    todayCount,
+    weekCount,
+    missionBonusPoints,
     totalPoints,
     streak: calculateStreak(records),
     weeklyRate: Number((recent.length / 7).toFixed(1)),

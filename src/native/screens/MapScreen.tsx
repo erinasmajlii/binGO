@@ -1,13 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, ActivityIndicator, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
-import MapView, { LatLng, MapPressEvent, Marker, Polyline, Region } from "react-native-maps";
+import {
+  View,
+  ActivityIndicator,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import MapView, {
+  LatLng,
+  MapPressEvent,
+  Marker,
+  Polyline,
+  Region,
+} from "react-native-maps";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
-import { BinMarker, loadBins, saveBins } from "../../lib/bins";
+import {
+  BinMarker,
+  loadBins,
+  addBinToDatabase,
+  removeBinFromDatabase,
+  subscribeToBinsRealtimeUpdates,
+} from "../../lib/bins";
 import { clearActiveRoute, getActiveRoute } from "../../lib/route";
 
 export function MapScreen() {
-  const [location, setLocation] = useState<Location.LocationObjectCoords | null>(null);
+  const insets = useSafeAreaInsets();
+  const [location, setLocation] =
+    useState<Location.LocationObjectCoords | null>(null);
   const [loading, setLoading] = useState(true);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -15,14 +37,19 @@ export function MapScreen() {
   const [bins, setBins] = useState<BinMarker[]>([]);
   const [binsLoaded, setBinsLoaded] = useState(false);
   const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
-  const [routeDistanceMeters, setRouteDistanceMeters] = useState<number | null>(null);
-  const [routeDestination, setRouteDestination] = useState<BinMarker | null>(null);
+  const [routeDistanceMeters, setRouteDistanceMeters] = useState<number | null>(
+    null,
+  );
+  const [routeDestination, setRouteDestination] = useState<BinMarker | null>(
+    null,
+  );
   const [isRouting, setIsRouting] = useState(false);
   const mapRef = useRef<MapView | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const hasMeaningfulMovement = (
     current: Location.LocationObjectCoords | null,
-    next: Location.LocationObjectCoords
+    next: Location.LocationObjectCoords,
   ) => {
     if (!current) return true;
 
@@ -36,7 +63,8 @@ export function MapScreen() {
         Math.cos(toRadians(next.latitude)) *
         Math.sin(dLon / 2) *
         Math.sin(dLon / 2);
-    const distance = earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance =
+      earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     // Ignore tiny GPS jitter while standing still.
     return distance >= 2;
@@ -82,13 +110,15 @@ export function MapScreen() {
             setLocation((currentLocation) =>
               hasMeaningfulMovement(currentLocation, nextLocation.coords)
                 ? nextLocation.coords
-                : currentLocation
+                : currentLocation,
             );
-          }
+          },
         );
       } catch (err) {
         console.log("Location error:", err);
-        setErrorMessage("Could not read your location. Check device settings and GPS.");
+        setErrorMessage(
+          "Could not read your location. Check device settings and GPS.",
+        );
         setMapInitialRegion(initialRegion);
       } finally {
         setLoading(false);
@@ -102,9 +132,10 @@ export function MapScreen() {
 
   useEffect(() => {
     (async () => {
+      // Initial load of bins from Supabase (or local storage fallback)
       const storedBins = await loadBins();
 
-      // De-duplicate bins from storage by rounded coordinates.
+      // De-duplicate bins from storage by rounded coordinates
       const seen = new Set<string>();
       const uniqueBins = storedBins.filter((bin) => {
         const key = `${bin.latitude.toFixed(6)}:${bin.longitude.toFixed(6)}`;
@@ -115,26 +146,52 @@ export function MapScreen() {
 
       setBins(uniqueBins);
       setBinsLoaded(true);
-    })();
-  }, []);
 
-  useEffect(() => {
-    if (!binsLoaded) return;
-    void saveBins(bins);
-  }, [bins, binsLoaded]);
+      // Set up real-time subscription to listen for changes from other users/devices
+      const unsubscribe = subscribeToBinsRealtimeUpdates((updatedBins) => {
+        // De-duplicate updated bins
+        const seenUpdated = new Set<string>();
+        const uniqueUpdated = updatedBins.filter((bin) => {
+          const key = `${bin.latitude.toFixed(6)}:${bin.longitude.toFixed(6)}`;
+          if (seenUpdated.has(key)) return false;
+          seenUpdated.add(key);
+          return true;
+        });
+
+        setBins(uniqueUpdated);
+      });
+
+      unsubscribeRef.current = unsubscribe;
+    })();
+
+    // Cleanup: unsubscribe when component unmounts
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+    };
+  }, []);
 
   const lat = location?.latitude ?? initialRegion.latitude;
   const lon = location?.longitude ?? initialRegion.longitude;
 
   const toRadians = (value: number) => (value * Math.PI) / 180;
 
-  const distanceInMeters = (fromLat: number, fromLon: number, toLat: number, toLon: number) => {
+  const distanceInMeters = (
+    fromLat: number,
+    fromLon: number,
+    toLat: number,
+    toLon: number,
+  ) => {
     const earthRadius = 6371000;
     const dLat = toRadians(toLat - fromLat);
     const dLon = toRadians(toLon - fromLon);
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(toRadians(fromLat)) * Math.cos(toRadians(toLat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(toRadians(fromLat)) *
+        Math.cos(toRadians(toLat)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
 
     return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
@@ -146,16 +203,27 @@ export function MapScreen() {
   };
 
   const routeStart = routeCoords.length > 0 ? routeCoords[0] : null;
-  const routeEnd = routeCoords.length > 0 ? routeCoords[routeCoords.length - 1] : null;
+  const routeEnd =
+    routeCoords.length > 0 ? routeCoords[routeCoords.length - 1] : null;
 
   const startConnectorDistance =
     location && routeStart
-      ? distanceInMeters(location.latitude, location.longitude, routeStart.latitude, routeStart.longitude)
+      ? distanceInMeters(
+          location.latitude,
+          location.longitude,
+          routeStart.latitude,
+          routeStart.longitude,
+        )
       : 0;
 
   const endConnectorDistance =
     routeDestination && routeEnd
-      ? distanceInMeters(routeEnd.latitude, routeEnd.longitude, routeDestination.latitude, routeDestination.longitude)
+      ? distanceInMeters(
+          routeEnd.latitude,
+          routeEnd.longitude,
+          routeDestination.latitude,
+          routeDestination.longitude,
+        )
       : 0;
 
   const shouldShowStartConnector = startConnectorDistance > 2;
@@ -168,22 +236,30 @@ export function MapScreen() {
         (shouldShowStartConnector ? startConnectorDistance : 0) +
         (shouldShowEndConnector ? endConnectorDistance : 0);
 
-  const renderFallbackRoute = useCallback((destination: BinMarker, source: Location.LocationObjectCoords) => {
-    const fallbackCoords: LatLng[] = [
-      { latitude: source.latitude, longitude: source.longitude },
-      { latitude: destination.latitude, longitude: destination.longitude },
-    ];
+  const renderFallbackRoute = useCallback(
+    (destination: BinMarker, source: Location.LocationObjectCoords) => {
+      const fallbackCoords: LatLng[] = [
+        { latitude: source.latitude, longitude: source.longitude },
+        { latitude: destination.latitude, longitude: destination.longitude },
+      ];
 
-    setRouteCoords(fallbackCoords);
-    setRouteDistanceMeters(
-      distanceInMeters(source.latitude, source.longitude, destination.latitude, destination.longitude)
-    );
+      setRouteCoords(fallbackCoords);
+      setRouteDistanceMeters(
+        distanceInMeters(
+          source.latitude,
+          source.longitude,
+          destination.latitude,
+          destination.longitude,
+        ),
+      );
 
-    mapRef.current?.fitToCoordinates(fallbackCoords, {
-      edgePadding: { top: 80, right: 40, bottom: 180, left: 40 },
-      animated: true,
-    });
-  }, []);
+      mapRef.current?.fitToCoordinates(fallbackCoords, {
+        edgePadding: { top: 80, right: 40, bottom: 180, left: 40 },
+        animated: true,
+      });
+    },
+    [],
+  );
 
   const buildRoute = useCallback(
     async (destination: BinMarker) => {
@@ -194,7 +270,7 @@ export function MapScreen() {
 
       try {
         const response = await fetch(
-          `https://router.project-osrm.org/route/v1/foot/${location.longitude},${location.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`
+          `https://router.project-osrm.org/route/v1/foot/${location.longitude},${location.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`,
         );
 
         if (!response.ok) {
@@ -217,7 +293,9 @@ export function MapScreen() {
         }));
 
         setRouteCoords(coords);
-        setRouteDistanceMeters(typeof route?.distance === "number" ? route.distance : null);
+        setRouteDistanceMeters(
+          typeof route?.distance === "number" ? route.distance : null,
+        );
         mapRef.current?.fitToCoordinates(coords, {
           edgePadding: { top: 80, right: 40, bottom: 180, left: 40 },
           animated: true,
@@ -228,8 +306,30 @@ export function MapScreen() {
         setIsRouting(false);
       }
     },
-    [location, renderFallbackRoute]
+    [location, renderFallbackRoute],
   );
+
+  const findNearestBin = useCallback((): BinMarker | null => {
+    if (!location || bins.length === 0) return null;
+
+    let nearest: BinMarker | null = null;
+    let minDistance = Infinity;
+
+    for (const bin of bins) {
+      const distance = distanceInMeters(
+        location.latitude,
+        location.longitude,
+        bin.latitude,
+        bin.longitude,
+      );
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearest = bin;
+      }
+    }
+
+    return nearest;
+  }, [location, bins]);
 
   useFocusEffect(
     useCallback(() => {
@@ -250,7 +350,7 @@ export function MapScreen() {
       return () => {
         active = false;
       };
-    }, [buildRoute, location])
+    }, [buildRoute, location]),
   );
 
   const recenterMap = () => {
@@ -262,19 +362,25 @@ export function MapScreen() {
           latitudeDelta: 0.01,
           longitudeDelta: 0.01,
         },
-        500
+        500,
       );
     }
   };
 
-  const addBinAtCurrentLocation = () => {
+  const addBinAtCurrentLocation = async () => {
     if (!location) {
       setErrorMessage("Current location is not available yet.");
       return;
     }
 
     const existsNearby = bins.some(
-      (bin) => distanceInMeters(bin.latitude, bin.longitude, location.latitude, location.longitude) < 3
+      (bin) =>
+        distanceInMeters(
+          bin.latitude,
+          bin.longitude,
+          location.latitude,
+          location.longitude,
+        ) < 3,
     );
     if (existsNearby) {
       setErrorMessage("A bin already exists at this location.");
@@ -288,15 +394,24 @@ export function MapScreen() {
       source: "current",
     };
 
-    setBins((prev) => [...prev, newBin]);
-    setErrorMessage(null);
+    // Try to save to Supabase; if it fails, still add locally
+    const saved = await addBinToDatabase(newBin);
+    if (saved) {
+      setBins((prev) => [...prev, newBin]);
+      setErrorMessage(null);
+    } else {
+      // Supabase failed; add to local state anyway
+      setBins((prev) => [...prev, newBin]);
+      setErrorMessage("Added locally. Server sync may be delayed.");
+    }
   };
 
-  const addBinManually = (event: MapPressEvent) => {
+  const addBinManually = async (event: MapPressEvent) => {
     const { latitude, longitude } = event.nativeEvent.coordinate;
 
     const existsNearby = bins.some(
-      (bin) => distanceInMeters(bin.latitude, bin.longitude, latitude, longitude) < 3
+      (bin) =>
+        distanceInMeters(bin.latitude, bin.longitude, latitude, longitude) < 3,
     );
     if (existsNearby) {
       setErrorMessage("A bin already exists at this location.");
@@ -310,8 +425,16 @@ export function MapScreen() {
       source: "manual",
     };
 
-    setBins((prev) => [...prev, newBin]);
-    setErrorMessage(null);
+    // Try to save to Supabase; if it fails, still add locally
+    const saved = await addBinToDatabase(newBin);
+    if (saved) {
+      setBins((prev) => [...prev, newBin]);
+      setErrorMessage(null);
+    } else {
+      // Supabase failed; add to local state anyway
+      setBins((prev) => [...prev, newBin]);
+      setErrorMessage("Added locally. Server sync may be delayed.");
+    }
   };
 
   const removeBin = (id: string) => {
@@ -320,8 +443,13 @@ export function MapScreen() {
       {
         text: "Remove",
         style: "destructive",
-        onPress: () => {
+        onPress: async () => {
+          // Try to remove from Supabase; always remove from local state
+          const removed = await removeBinFromDatabase(id);
           setBins((prev) => prev.filter((bin) => bin.id !== id));
+          if (!removed) {
+            setErrorMessage("Removed locally. Server sync may be delayed.");
+          }
         },
       },
     ]);
@@ -337,7 +465,7 @@ export function MapScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(12, insets.top) }]}>
         <Text style={styles.title}>Map</Text>
         <Text style={styles.subtitle}>
           {permissionDenied
@@ -405,7 +533,10 @@ export function MapScreen() {
           <Polyline
             coordinates={[
               routeEnd,
-              { latitude: routeDestination.latitude, longitude: routeDestination.longitude },
+              {
+                latitude: routeDestination.latitude,
+                longitude: routeDestination.longitude,
+              },
             ]}
             strokeColor="#0284c7"
             strokeWidth={4}
@@ -415,30 +546,50 @@ export function MapScreen() {
       </MapView>
 
       <View style={styles.footer}>
-        <Text style={styles.helperText}>Long press map to place manually. Tap a bin to remove it.</Text>
+        <Text style={styles.helperText}>
+          Long press map to place manually. Tap a bin to remove it.
+        </Text>
         {routeDestination ? (
           <View style={styles.routeCard}>
             <Text style={styles.routeTitle}>Nearest Bin Route</Text>
             <Text style={styles.routeValue}>
-              {isRouting ? "Calculating route..." : `Distance: ${formatDistance(displayDistance)}`}
+              {isRouting
+                ? "Calculating route..."
+                : `Distance: ${formatDistance(displayDistance)}`}
             </Text>
           </View>
         ) : null}
-        <TouchableOpacity style={[styles.button, styles.spacing]} onPress={addBinAtCurrentLocation} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={[styles.button, styles.spacing]}
+          onPress={addBinAtCurrentLocation}
+          activeOpacity={0.85}
+        >
           <Text style={styles.buttonText}>Add Bin At My Location</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.button, styles.spacing]}
           onPress={() => {
-            if (routeDestination) {
-              void buildRoute(routeDestination);
+            const nearestBin = findNearestBin();
+            if (nearestBin) {
+              void buildRoute(nearestBin);
+            } else {
+              setErrorMessage(
+                "No bins found on the map. Add one to start routing.",
+              );
+              setRouteCoords([]);
+              setRouteDistanceMeters(null);
+              setRouteDestination(null);
             }
           }}
           activeOpacity={0.85}
         >
           <Text style={styles.buttonText}>Refresh Route</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.button} onPress={recenterMap} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={recenterMap}
+          activeOpacity={0.85}
+        >
           <Text style={styles.buttonText}>Recenter on me</Text>
         </TouchableOpacity>
       </View>
@@ -455,7 +606,12 @@ const styles = StyleSheet.create({
   footer: { padding: 16, backgroundColor: "#ecfdf5" },
   helperText: { marginBottom: 10, color: "#475569", fontSize: 12 },
   spacing: { marginBottom: 10 },
-  button: { backgroundColor: "#10b981", paddingVertical: 14, borderRadius: 14, alignItems: "center" },
+  button: {
+    backgroundColor: "#10b981",
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+  },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   routeCard: {
     backgroundColor: "#ffffff",
@@ -466,7 +622,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   routeTitle: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
-  routeValue: { color: "#0369a1", marginTop: 2, fontSize: 13, fontWeight: "600" },
+  routeValue: {
+    color: "#0369a1",
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: "600",
+  },
   binMarker: {
     width: 32,
     height: 32,
