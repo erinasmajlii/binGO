@@ -1,6 +1,39 @@
-Setup instructions to create `leaderboard_scores` in Supabase
+Setup instructions for Supabase (project: `tacrqjndguhlbsugxbal`)
 
-1) Open Supabase dashboard for your project (Project ref: kslmzthdojxsbbqblrgs).
+Run these in **SQL Editor** in order (each file is safe to re-run):
+
+1. `bins.sql` — bins table + RLS
+2. `leaderboard.sql` — leaderboard table + RLS
+3. `cleanup_leaderboard_duplicates.sql` — removes duplicate Alice/Bob/Carol rows
+4. `display_exp_view.sql` — user EcoXP view
+5. `realtime.sql` — realtime for bins + leaderboard
+6. `upsert_user_score.sql` — add/update one user (edit UUID/name/points)
+
+**Do not** use old saved queries in the dashboard if they contain typos like `asSELECT`, `uescapeLEFT JOIN`, or duplicated `CREATE VIEW` blocks.
+
+### SQL Editor sidebar (one-time cleanup)
+
+Supabase API cannot delete/create saved queries from CLI. In the dashboard SQL Editor sidebar, delete these **old** private snippets (broken copies):
+
+- User EcoXP Display View (both duplicates)
+- User EcoXP and Display Names View
+- Fetch Users with EcoXP Leaderboard Points
+- Retrieve Registered Users
+- Leaderboard Top Scorers Ranking
+- Add Tables to Realtime Publication
+- Leaderboard Scores Table Setup
+- Bins table with public RLS policies
+- Bins table with geospatial indexing and public RLS policies
+
+Then create **New query** for each file in `supabase/snippets/` (copy/paste content, save with the same filename).
+
+Or run everything from terminal: `npm run supabase:setup`
+
+---
+
+Legacy note (older project ref `kslmzthdojxsbbqblrgs`):
+
+1) Open Supabase dashboard for your project.
 2) Go to "SQL Editor" and paste the contents of `supabase_setup/leaderboard.sql` then Run.
 
 3) Verify results in SQL Editor with:

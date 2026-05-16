@@ -26,6 +26,7 @@ export type LeaderboardEntry = {
 
 const STORAGE_KEY_PREFIX = "bingo:capture-records:v2";
 const MISSION_BONUS_STORAGE_KEY_PREFIX = "bingo:mission-bonus:v1";
+const SYNCED_LOCAL_XP_KEY_PREFIX = "bingo:synced-local-xp:v1";
 
 // Static NPC players for leaderboard benchmarks
 const NPC_PLAYERS: LeaderboardEntry[] = [
@@ -193,6 +194,48 @@ async function writeMissionBonusPoints(
   );
 }
 
+async function getSyncedLocalXpStorageKey(userKey?: string): Promise<string> {
+  if (userKey && userKey.trim()) {
+    return `${SYNCED_LOCAL_XP_KEY_PREFIX}:${normalizeKeyPart(userKey)}`;
+  }
+
+  if (supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const user = data.session?.user;
+      const candidate = user?.id || user?.email;
+      if (candidate) {
+        return `${SYNCED_LOCAL_XP_KEY_PREFIX}:${normalizeKeyPart(candidate)}`;
+      }
+    } catch {
+      // Fallback to guest key when session lookup fails.
+    }
+  }
+
+  return `${SYNCED_LOCAL_XP_KEY_PREFIX}:guest`;
+}
+
+async function readSyncedLocalXp(userKey?: string): Promise<number> {
+  const storageKey = await getSyncedLocalXpStorageKey(userKey);
+  try {
+    const raw = await AsyncStorage.getItem(storageKey);
+    if (!raw) return 0;
+
+    const parsed = JSON.parse(raw) as { points?: number };
+    return Number(parsed?.points || 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function writeSyncedLocalXp(points: number, userKey?: string): Promise<void> {
+  const storageKey = await getSyncedLocalXpStorageKey(userKey);
+  await AsyncStorage.setItem(
+    storageKey,
+    JSON.stringify({ points, updatedAt: Date.now() }),
+  );
+}
+
 async function getCurrentUserIdentity() {
   if (!supabase) return null;
 
@@ -216,6 +259,51 @@ async function getCurrentUserIdentity() {
   }
 }
 
+/** Add points on top of the current DB total (keeps manual/admin scores). */
+async function incrementUserEcoXpInDb(
+  amount: number,
+  userKey?: string,
+): Promise<number | null> {
+  if (!supabase || amount <= 0) return null;
+
+  const identity = await getCurrentUserIdentity();
+  if (!identity) return null;
+
+  try {
+    const { data: row } = await supabase
+      .from("leaderboard_scores")
+      .select("total_points")
+      .eq("user_id", identity.id)
+      .maybeSingle();
+
+    const dbTotal = Number(
+      (row as { total_points?: number } | null)?.total_points ?? 0,
+    );
+    const total_points = dbTotal + amount;
+
+    const { error } = await supabase.from("leaderboard_scores").upsert(
+      {
+        user_id: identity.id,
+        display_name: identity.displayName,
+        total_points,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" },
+    );
+
+    if (error) return null;
+
+    const records = await readRecordsForUser(userKey);
+    const missionBonusPoints = await readMissionBonusPoints(userKey);
+    const capturePoints = records.reduce((sum, item) => sum + item.points, 0);
+    await writeSyncedLocalXp(capturePoints + missionBonusPoints, userKey);
+
+    return total_points;
+  } catch {
+    return null;
+  }
+}
+
 async function syncCurrentUserLeaderboardScore(
   userKey?: string,
 ): Promise<void> {
@@ -227,19 +315,57 @@ async function syncCurrentUserLeaderboardScore(
   const records = await readRecordsForUser(userKey);
   const missionBonusPoints = await readMissionBonusPoints(userKey);
   const capturePoints = records.reduce((sum, item) => sum + item.points, 0);
+  const localTotal = capturePoints + missionBonusPoints;
 
   try {
-    await supabase.from("leaderboard_scores").upsert(
+    const { data: row } = await supabase
+      .from("leaderboard_scores")
+      .select("total_points")
+      .eq("user_id", identity.id)
+      .maybeSingle();
+
+    const dbTotal = Number(
+      (row as { total_points?: number } | null)?.total_points ?? 0,
+    );
+    const syncedLocalXp = await readSyncedLocalXp(userKey);
+    const delta = Math.max(0, localTotal - syncedLocalXp);
+
+    // DB already higher (manual set): only apply new local progress on top.
+    const total_points =
+      dbTotal > localTotal && delta === 0 ? dbTotal : dbTotal + delta;
+
+    const { error } = await supabase.from("leaderboard_scores").upsert(
       {
         user_id: identity.id,
         display_name: identity.displayName,
-        total_points: capturePoints + missionBonusPoints,
+        total_points,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
     );
+
+    if (!error) {
+      await writeSyncedLocalXp(localTotal, userKey);
+    }
   } catch {
     // Keep local flow resilient when leaderboard sync fails.
+  }
+}
+
+/** Reload EcoXP from DB (e.g. after mission claim or profile focus). */
+export async function fetchUserEcoXpFromDb(userId: string): Promise<number> {
+  if (!supabase) return 0;
+
+  try {
+    const { data: row } = await supabase
+      .from("leaderboard_scores")
+      .select("total_points")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    return Number((row as { total_points?: number } | null)?.total_points ?? 0);
+  } catch {
+    return 0;
   }
 }
 
@@ -280,7 +406,7 @@ export async function saveCaptureRecord(
 
   const trimmedRecords = records.slice(0, 300);
   await writeRecordsForUser(trimmedRecords, userKey);
-  await syncCurrentUserLeaderboardScore(userKey);
+  await incrementUserEcoXpInDb(record.points, userKey);
 
   return record;
 }
@@ -289,10 +415,16 @@ export async function awardMissionXp(
   points: number,
   userKey?: string,
 ): Promise<number> {
+  const amount = Math.max(0, Number(points) || 0);
   const current = await readMissionBonusPoints(userKey);
-  const updated = current + Math.max(0, Number(points) || 0);
+  const updated = current + amount;
   await writeMissionBonusPoints(updated, userKey);
-  await syncCurrentUserLeaderboardScore(userKey);
+
+  const dbTotal = await incrementUserEcoXpInDb(amount, userKey);
+  if (dbTotal === null) {
+    await syncCurrentUserLeaderboardScore(userKey);
+  }
+
   return updated;
 }
 
@@ -382,12 +514,19 @@ function calculateStreak(records: CaptureRecord[]): number {
   return streak;
 }
 
-export async function getCaptureStats(userKey?: string) {
+export async function getCaptureStats(
+  userKey?: string,
+  leaderboardTotal?: number,
+) {
   const records = await readRecordsForUser(userKey);
   const total = records.length;
   const capturePoints = records.reduce((sum, record) => sum + record.points, 0);
   const missionBonusPoints = await readMissionBonusPoints(userKey);
-  const totalPoints = capturePoints + missionBonusPoints;
+  const localPoints = capturePoints + missionBonusPoints;
+  const totalPoints =
+    typeof leaderboardTotal === "number" && leaderboardTotal >= localPoints
+      ? leaderboardTotal
+      : localPoints;
 
   const now = new Date();
   const startOfDay = new Date(

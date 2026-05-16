@@ -4,7 +4,12 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-import { getGlobalLeaderboard, LeaderboardEntry, getCaptureStats, awardMissionXp } from "../../lib/trashStats";
+import {
+  awardMissionXp,
+  getCaptureStats,
+  getGlobalLeaderboard,
+  LeaderboardEntry,
+} from "../../lib/trashStats";
 import {
   getDailyMissionState,
   getWeeklyMissionState,

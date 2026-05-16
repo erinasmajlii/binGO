@@ -5,14 +5,24 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../../lib/supabase";
-import { getCaptureStats } from "../../lib/trashStats";
+import {
+  fetchUserEcoXpFromDb,
+  getCaptureStats,
+} from "../../lib/trashStats";
+
+const XP_PER_LEVEL = 5000;
 
 export function HomeScreen() {
   const router = useRouter();
   const [username, setUsername] = useState("Guest");
   const [statsUserKey, setStatsUserKey] = useState("guest");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [ecoXp, setEcoXp] = useState(0);
   const [streakDays, setStreakDays] = useState(0);
   const [cleanupCount, setCleanupCount] = useState(0);
+
+  const goToProfile = () => router.push("/(tabs)/profile");
+  const level = Math.floor(ecoXp / XP_PER_LEVEL) + 1;
 
   useEffect(() => {
     if (!supabase) return;
@@ -24,14 +34,20 @@ export function HomeScreen() {
       const user = data.session?.user;
       if (!mounted) return;
 
-      setUsername(user?.email ?? "Guest");
+      const name =
+        user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
+      setUsername(name);
       setStatsUserKey(user?.id || user?.email || "guest");
+      setUserId(user?.id ?? null);
     })();
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user;
-      setUsername(user?.email ?? "Guest");
+      const name =
+        user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
+      setUsername(name);
       setStatsUserKey(user?.id || user?.email || "guest");
+      setUserId(user?.id ?? null);
     });
 
     return () => {
@@ -43,14 +59,22 @@ export function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       const load = async () => {
-        const stats = await getCaptureStats(statsUserKey);
+        let dbXp = 0;
+        if (userId) {
+          dbXp = await fetchUserEcoXpFromDb(userId);
+          setEcoXp(dbXp);
+        } else {
+          setEcoXp(0);
+        }
+
+        const stats = await getCaptureStats(statsUserKey, dbXp);
         setStreakDays(stats.streak);
         setCleanupCount(stats.total);
       };
 
       load();
       return () => {};
-    }, [statsUserKey])
+    }, [statsUserKey, userId]),
   );
 
   const userInitial = username.charAt(0).toUpperCase();
@@ -62,17 +86,23 @@ export function HomeScreen() {
         <Text style={styles.headerTitle}>
           bin<Text style={{ fontWeight: "700" }}>Go</Text>
         </Text>
-        <View style={styles.headerRight}>
+        <TouchableOpacity
+          style={styles.headerRight}
+          onPress={goToProfile}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile"
+        >
           <View style={styles.xpBadge}>
-            <Text style={styles.xpText}>9,435</Text>
+            <Text style={styles.xpText}>{ecoXp.toLocaleString()}</Text>
           </View>
           <View style={styles.lvBadge}>
-            <Text style={styles.lvText}>Lv 7</Text>
+            <Text style={styles.lvText}>Lv {level}</Text>
           </View>
-          <TouchableOpacity style={styles.avatar} onPress={() => router.push("/(tabs)/profile")}>
+          <View style={styles.avatar}>
             <Text style={styles.avatarText}>{userInitial}</Text>
-          </TouchableOpacity>
-        </View>
+          </View>
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>

@@ -24,6 +24,7 @@ import {
   removeBinFromDatabase,
   subscribeToBinsRealtimeUpdates,
 } from "../../lib/bins";
+
 import { clearActiveRoute, getActiveRoute } from "../../lib/route";
 
 export function MapScreen() {
@@ -309,27 +310,65 @@ export function MapScreen() {
     [location, renderFallbackRoute],
   );
 
-  const findNearestBin = useCallback((): BinMarker | null => {
-    if (!location || bins.length === 0) return null;
+  const clearRoute = useCallback(() => {
+    setRouteCoords([]);
+    setRouteDistanceMeters(null);
+    setRouteDestination(null);
+    setIsRouting(false);
+  }, []);
 
-    let nearest: BinMarker | null = null;
-    let minDistance = Infinity;
+  const findNearestBin = useCallback(
+    (sourceBins: BinMarker[] = bins): BinMarker | null => {
+      if (!location || sourceBins.length === 0) return null;
 
-    for (const bin of bins) {
-      const distance = distanceInMeters(
-        location.latitude,
-        location.longitude,
-        bin.latitude,
-        bin.longitude,
-      );
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearest = bin;
+      let nearest: BinMarker | null = null;
+      let minDistance = Infinity;
+
+      for (const bin of sourceBins) {
+        const distance = distanceInMeters(
+          location.latitude,
+          location.longitude,
+          bin.latitude,
+          bin.longitude,
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearest = bin;
+        }
       }
-    }
 
-    return nearest;
-  }, [location, bins]);
+      return nearest;
+    },
+    [location, bins],
+  );
+
+  const routeToNearestBin = useCallback(
+    (availableBins: BinMarker[]) => {
+      const nearest = findNearestBin(availableBins);
+      if (nearest) {
+        void buildRoute(nearest);
+        return;
+      }
+      clearRoute();
+    },
+    [findNearestBin, buildRoute, clearRoute],
+  );
+
+  // If the routed bin disappears (removed locally or via realtime), reroute or clear.
+  useEffect(() => {
+    if (!routeDestination) return;
+
+    const destinationStillExists = bins.some(
+      (bin) => bin.id === routeDestination.id,
+    );
+    if (destinationStillExists) return;
+
+    if (bins.length > 0 && location) {
+      routeToNearestBin(bins);
+    } else {
+      clearRoute();
+    }
+  }, [bins, routeDestination, location, routeToNearestBin, clearRoute]);
 
   useFocusEffect(
     useCallback(() => {
@@ -444,11 +483,27 @@ export function MapScreen() {
         text: "Remove",
         style: "destructive",
         onPress: async () => {
-          // Try to remove from Supabase; always remove from local state
           const removed = await removeBinFromDatabase(id);
-          setBins((prev) => prev.filter((bin) => bin.id !== id));
+          const nextBins = bins.filter((bin) => bin.id !== id);
+          const removedRoutedBin =
+            routeDestination?.id === id ||
+            (routeDestination !== null &&
+              !nextBins.some((bin) => bin.id === routeDestination.id));
+
+          setBins(nextBins);
+
+          if (removedRoutedBin) {
+            if (nextBins.length > 0 && location) {
+              routeToNearestBin(nextBins);
+            } else {
+              clearRoute();
+            }
+          }
+
           if (!removed) {
             setErrorMessage("Removed locally. Server sync may be delayed.");
+          } else if (removedRoutedBin && nextBins.length > 0) {
+            setErrorMessage(null);
           }
         },
       },
@@ -572,13 +627,12 @@ export function MapScreen() {
             const nearestBin = findNearestBin();
             if (nearestBin) {
               void buildRoute(nearestBin);
+              setErrorMessage(null);
             } else {
               setErrorMessage(
                 "No bins found on the map. Add one to start routing.",
               );
-              setRouteCoords([]);
-              setRouteDistanceMeters(null);
-              setRouteDestination(null);
+              clearRoute();
             }
           }}
           activeOpacity={0.85}
