@@ -228,7 +228,10 @@ async function readSyncedLocalXp(userKey?: string): Promise<number> {
   }
 }
 
-async function writeSyncedLocalXp(points: number, userKey?: string): Promise<void> {
+async function writeSyncedLocalXp(
+  points: number,
+  userKey?: string,
+): Promise<void> {
   const storageKey = await getSyncedLocalXpStorageKey(userKey);
   await AsyncStorage.setItem(
     storageKey,
@@ -252,6 +255,7 @@ async function getCurrentUserIdentity() {
 
     return {
       id: user.id,
+      email: user.email ?? "",
       displayName,
     };
   } catch {
@@ -259,7 +263,17 @@ async function getCurrentUserIdentity() {
   }
 }
 
-/** Add points on top of the current DB total (keeps manual/admin scores). */
+/**
+ * Increment EcoXP in the DB for the current user.
+ *
+ * Strategy:
+ *  1. Write to `leaderboard_scores` table.
+ *     New value = max(current total_points + amount, all local XP accumulated).
+ *     This means:
+ *       - Hardcoded base scores (e.g. Art = 10 000) are preserved and grow.
+ *       - Previously unsynced local scans are caught up in the same write.
+ *  2. The `display_exp` view is read-only and will automatically reflect the changes.
+ */
 async function incrementUserEcoXpInDb(
   amount: number,
   userKey?: string,
@@ -270,36 +284,61 @@ async function incrementUserEcoXpInDb(
   if (!identity) return null;
 
   try {
-    const { data: row } = await supabase
+    // --- Read local total (includes the new record already saved by the caller) ---
+    const records = await readRecordsForUser(userKey);
+    const missionBonusPoints = await readMissionBonusPoints(userKey);
+    const localTotal =
+      records.reduce((sum, item) => sum + item.points, 0) + missionBonusPoints;
+
+    // ── leaderboard_scores (primary store) ───────────────────────────────
+    const { data: lbRow } = await supabase
       .from("leaderboard_scores")
       .select("total_points")
       .eq("user_id", identity.id)
       .maybeSingle();
 
-    const dbTotal = Number(
-      (row as { total_points?: number } | null)?.total_points ?? 0,
+    const currentLbXp = Number((lbRow as any)?.total_points ?? 0);
+    // Preserve manually-set base scores (e.g. Art = 10 000) + add new XP.
+    // Also catches up previously-unsynced local scans.
+    const newLbXp = Math.max(currentLbXp + amount, localTotal);
+
+    if (lbRow !== null) {
+      // Row exists → UPDATE
+      const { error: lbUpdErr } = await supabase
+        .from("leaderboard_scores")
+        .update({
+          display_name: identity.displayName,
+          total_points: newLbXp,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", identity.id);
+      if (lbUpdErr) {
+        console.error("[XP] leaderboard update error:", lbUpdErr.message);
+        return null;
+      }
+    } else {
+      // No row yet → INSERT
+      const { error: lbInsErr } = await supabase
+        .from("leaderboard_scores")
+        .insert({
+          user_id: identity.id,
+          display_name: identity.displayName,
+          total_points: newLbXp,
+          updated_at: new Date().toISOString(),
+        });
+      if (lbInsErr) {
+        console.error("[XP] leaderboard insert error:", lbInsErr.message);
+        return null;
+      }
+    }
+
+    await writeSyncedLocalXp(localTotal, userKey);
+    console.log(
+      `[XP] +${amount} → leaderboard=${newLbXp} localTotal=${localTotal}`,
     );
-    const total_points = dbTotal + amount;
-
-    const { error } = await supabase.from("leaderboard_scores").upsert(
-      {
-        user_id: identity.id,
-        display_name: identity.displayName,
-        total_points,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
-
-    if (error) return null;
-
-    const records = await readRecordsForUser(userKey);
-    const missionBonusPoints = await readMissionBonusPoints(userKey);
-    const capturePoints = records.reduce((sum, item) => sum + item.points, 0);
-    await writeSyncedLocalXp(capturePoints + missionBonusPoints, userKey);
-
-    return total_points;
-  } catch {
+    return newLbXp;
+  } catch (ex) {
+    console.error("[XP] incrementUserEcoXpInDb exception:", ex);
     return null;
   }
 }
@@ -318,52 +357,76 @@ async function syncCurrentUserLeaderboardScore(
   const localTotal = capturePoints + missionBonusPoints;
 
   try {
-    const { data: row } = await supabase
+    // ── leaderboard_scores (primary store) ───────────────────────────────────
+    const { data: lbRow } = await supabase
       .from("leaderboard_scores")
       .select("total_points")
       .eq("user_id", identity.id)
       .maybeSingle();
 
-    const dbTotal = Number(
-      (row as { total_points?: number } | null)?.total_points ?? 0,
-    );
+    const dbTotal = Number((lbRow as any)?.total_points ?? 0);
     const syncedLocalXp = await readSyncedLocalXp(userKey);
     const delta = Math.max(0, localTotal - syncedLocalXp);
-
-    // DB already higher (manual set): only apply new local progress on top.
-    const total_points =
+    const newLbTotal =
       dbTotal > localTotal && delta === 0 ? dbTotal : dbTotal + delta;
 
-    const { error } = await supabase.from("leaderboard_scores").upsert(
-      {
-        user_id: identity.id,
-        display_name: identity.displayName,
-        total_points,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
-
-    if (!error) {
-      await writeSyncedLocalXp(localTotal, userKey);
+    if (lbRow !== null) {
+      const { error: lbUpdErr } = await supabase
+        .from("leaderboard_scores")
+        .update({
+          display_name: identity.displayName,
+          total_points: newLbTotal,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", identity.id);
+      if (lbUpdErr)
+        console.error("[XP] sync leaderboard update error:", lbUpdErr.message);
+    } else {
+      const { error: lbInsErr } = await supabase
+        .from("leaderboard_scores")
+        .insert({
+          user_id: identity.id,
+          display_name: identity.displayName,
+          total_points: newLbTotal,
+          updated_at: new Date().toISOString(),
+        });
+      if (lbInsErr)
+        console.error("[XP] sync leaderboard insert error:", lbInsErr.message);
     }
-  } catch {
-    // Keep local flow resilient when leaderboard sync fails.
+
+    await writeSyncedLocalXp(localTotal, userKey);
+  } catch (ex) {
+    console.error("[XP] syncCurrentUserLeaderboardScore exception:", ex);
   }
 }
 
-/** Reload EcoXP from DB (e.g. after mission claim or profile focus). */
+/**
+ * Fetch authoritative EcoXP for a user from the DB.
+ * Reads `display_exp` first (UNRESTRICTED, no RLS), falls back to
+ * `leaderboard_scores` so older users without a display_exp row still work.
+ */
 export async function fetchUserEcoXpFromDb(userId: string): Promise<number> {
   if (!supabase) return 0;
 
   try {
-    const { data: row } = await supabase
+    // Primary: display_exp (UNRESTRICTED – always readable)
+    const { data: displayRow } = await supabase
+      .from("display_exp")
+      .select("ecoxp")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const displayXp = Number((displayRow as any)?.ecoxp ?? 0);
+    if (displayXp > 0) return displayXp;
+
+    // Fallback: leaderboard_scores
+    const { data: lbRow } = await supabase
       .from("leaderboard_scores")
       .select("total_points")
       .eq("user_id", userId)
       .maybeSingle();
 
-    return Number((row as { total_points?: number } | null)?.total_points ?? 0);
+    return Number((lbRow as any)?.total_points ?? 0);
   } catch {
     return 0;
   }

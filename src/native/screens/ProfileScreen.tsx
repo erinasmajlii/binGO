@@ -52,20 +52,25 @@ export function ProfileScreen() {
       setIsLoggedIn(Boolean(user));
       const name =
         user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
+      const userKey = user?.id || user?.email || "guest";
       setUsername(name);
       setUserEmail(user?.email || "");
-      setStatsUserKey(user?.id || user?.email || "guest");
+      setStatsUserKey(userKey);
 
-      // Fetch EcoXP from leaderboard_scores
+      // Resolve EcoXP as max(DB total, local total) so local scans are
+      // immediately visible even before the leaderboard row is written.
       if (user?.id) {
         const { data: row } = await supabase
           .from("leaderboard_scores")
           .select("total_points")
           .eq("user_id", user.id)
-          .single();
+          .maybeSingle();
 
-        if (row && mounted) {
-          setEcoXp(Number((row as any).total_points ?? 0));
+        const dbXp = Number((row as any)?.total_points ?? 0);
+        const captureStats = await getCaptureStats(userKey, dbXp);
+        if (mounted) {
+          setEcoXp(captureStats.totalPoints);
+          setStats(captureStats);
         }
       }
     })();
@@ -76,21 +81,25 @@ export function ProfileScreen() {
         setIsLoggedIn(Boolean(user));
         const name =
           user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
+        const userKey = user?.id || user?.email || "guest";
         setUsername(name);
         setUserEmail(user?.email || "");
-        setStatsUserKey(user?.id || user?.email || "guest");
+        setStatsUserKey(userKey);
 
-        // Fetch EcoXP from leaderboard_scores
+        // Re-resolve unified XP on auth change
         if (user?.id) {
           (async () => {
             const { data: row } = await supabase
               .from("leaderboard_scores")
               .select("total_points")
               .eq("user_id", user.id)
-              .single();
+              .maybeSingle();
 
-            if (row && mounted) {
-              setEcoXp(Number((row as any).total_points ?? 0));
+            const dbXp = Number((row as any)?.total_points ?? 0);
+            const captureStats = await getCaptureStats(userKey, dbXp);
+            if (mounted) {
+              setEcoXp(captureStats.totalPoints);
+              setStats(captureStats);
             }
           })();
         }
@@ -178,12 +187,14 @@ export function ProfileScreen() {
         user.user_metadata?.name || user.email?.split("@")[0] || "Guest";
       const userKey = user.id || user.email || "guest";
       const dbXp = await fetchUserEcoXpFromDb(user.id);
+      const captureStats = await getCaptureStats(userKey, dbXp);
 
       setUsername(name);
       setUserEmail(user.email || "");
       setStatsUserKey(userKey);
-      setEcoXp(dbXp);
-      setStats(await getCaptureStats(userKey, dbXp));
+      // Use the unified totalPoints (max of DB and local) as the single source of truth
+      setEcoXp(captureStats.totalPoints);
+      setStats(captureStats);
     } catch {
       // Keep profile usable when refresh fails offline.
     }
@@ -215,10 +226,9 @@ export function ProfileScreen() {
     return () => loop.stop();
   }, [pulse]);
 
-  const totalEcoXp = useMemo(
-    () => ecoXp ?? stats?.totalPoints ?? 0,
-    [ecoXp, stats?.totalPoints],
-  );
+  // ecoXp is always sourced from DB (leaderboard_scores) and is the single
+  // source of truth for both the Total EcoXP header and the Stats ECO XP tile.
+  const totalEcoXp = ecoXp;
   const level = useMemo(
     () => Math.floor(totalEcoXp / XP_PER_LEVEL) + 1,
     [totalEcoXp],
@@ -357,7 +367,7 @@ export function ProfileScreen() {
                 bg: "#dcfce7",
                 border: "#86efac",
                 label: "ECO XP",
-                value: String(ecoXp || (stats?.totalPoints ?? 0)),
+                value: ecoXp.toLocaleString(),
                 sub: "Total EcoXP",
               },
               {

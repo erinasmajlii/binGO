@@ -45,6 +45,8 @@ export function MapScreen() {
     null,
   );
   const [isRouting, setIsRouting] = useState(false);
+  const [pendingRouteDestination, setPendingRouteDestination] =
+    useState<BinMarker | null>(null);
   const mapRef = useRef<MapView | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -368,7 +370,7 @@ export function MapScreen() {
     } else {
       clearRoute();
     }
-  }, [bins, routeDestination, location, routeToNearestBin, clearRoute]);
+  }, [bins, routeDestination, location]);
 
   useFocusEffect(
     useCallback(() => {
@@ -378,11 +380,16 @@ export function MapScreen() {
         const routeRequest = await getActiveRoute();
         if (!active || !routeRequest?.destination) return;
 
-        setRouteDestination(routeRequest.destination);
         await clearActiveRoute();
+        setRouteDestination(routeRequest.destination);
 
         if (location) {
+          // Location already available — route immediately
           await buildRoute(routeRequest.destination);
+        } else {
+          // Location not ready yet — store destination; useEffect below will
+          // call buildRoute once location resolves
+          setPendingRouteDestination(routeRequest.destination);
         }
       })();
 
@@ -391,6 +398,15 @@ export function MapScreen() {
       };
     }, [buildRoute, location]),
   );
+
+  // Auto-build a pending route as soon as location becomes available.
+  // This handles the case where the map just mounted after a scan and
+  // location was not yet resolved when useFocusEffect ran.
+  useEffect(() => {
+    if (!pendingRouteDestination || !location) return;
+    setPendingRouteDestination(null);
+    void buildRoute(pendingRouteDestination);
+  }, [pendingRouteDestination, location, buildRoute]);
 
   const recenterMap = () => {
     if (location) {

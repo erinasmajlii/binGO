@@ -2,13 +2,14 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Image } fr
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { router } from "expo-router";
 import * as Location from "expo-location";
 import { BinMarker, loadBins } from "../../lib/bins";
 import { setActiveRoute } from "../../lib/route";
 import { CATEGORY_LABELS, classifyTrashPhoto, saveCaptureRecord } from "../../lib/trashStats";
 import { classifyTrashPhotoWithModel } from "../../lib/trashClassifierApi";
+import { supabase } from "../../lib/supabase";
 
 export function ReportScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -16,6 +17,17 @@ export function ReportScreen() {
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
   const [captureLabel, setCaptureLabel] = useState<string | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
+  const [currentUserKey, setCurrentUserKey] = useState<string | undefined>(undefined);
+
+  // Resolve the logged-in user's key once on mount so XP is written
+  // under the correct AsyncStorage + leaderboard key.
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user;
+      if (user) setCurrentUserKey(user.id || user.email || undefined);
+    });
+  }, []);
 
   const toRadians = (value: number) => (value * Math.PI) / 180;
 
@@ -76,7 +88,7 @@ export function ReportScreen() {
         classified = await classifyTrashPhoto(photo.uri);
       }
 
-      await saveCaptureRecord(photo.uri, classified.category, classified.confidence);
+      await saveCaptureRecord(photo.uri, classified.category, classified.confidence, currentUserKey);
 
       const detectionText = CATEGORY_LABELS[classified.category];
       setCaptureLabel(detectionText);

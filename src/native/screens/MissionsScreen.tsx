@@ -143,6 +143,21 @@ export function MissionsScreen() {
     }
   }, [shouldRefreshLeaderboard]);
 
+  /** Unconditional leaderboard fetch — used after mission claims to bypass the 24h cache. */
+  const forceRefreshLeaderboard = useCallback(async () => {
+    setLoadingLeaderboard(true);
+    setLeaderboardError(null);
+    try {
+      const rows = await getGlobalLeaderboard(3);
+      setLeaderboard(rows);
+      setLastLeaderboardRefresh(Date.now());
+    } catch (error) {
+      console.error("Error refreshing leaderboard:", error);
+    } finally {
+      setLoadingLeaderboard(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadMissions();
@@ -230,7 +245,8 @@ export function MissionsScreen() {
                   try {
                     await claimMissionReward(category, mission.id);
                     await awardMissionXp(mission.rewardXP, statsUserKey);
-                    await Promise.all([loadMissions(), loadMissionStats()]);
+                    // Force-refresh leaderboard immediately so updated score is reflected
+                    await Promise.all([loadMissions(), loadMissionStats(), forceRefreshLeaderboard()]);
                   } catch (error) {
                     console.error("Error claiming mission reward:", error);
                   } finally {
@@ -248,7 +264,7 @@ export function MissionsScreen() {
         </View>
       );
     },
-    [claimingMissionId, isClaimed, loadMissionStats, loadMissions, missionProgressContext, statsUserKey]
+    [claimingMissionId, forceRefreshLeaderboard, isClaimed, loadMissionStats, loadMissions, missionProgressContext, statsUserKey]
   );
 
   return (
