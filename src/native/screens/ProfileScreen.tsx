@@ -52,25 +52,20 @@ export function ProfileScreen() {
       setIsLoggedIn(Boolean(user));
       const name =
         user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
-      const userKey = user?.id || user?.email || "guest";
       setUsername(name);
       setUserEmail(user?.email || "");
-      setStatsUserKey(userKey);
+      setStatsUserKey(user?.id || user?.email || "guest");
 
-      // Resolve EcoXP as max(DB total, local total) so local scans are
-      // immediately visible even before the leaderboard row is written.
+      // Fetch EcoXP from leaderboard_scores
       if (user?.id) {
         const { data: row } = await supabase
           .from("leaderboard_scores")
           .select("total_points")
           .eq("user_id", user.id)
-          .maybeSingle();
+          .single();
 
-        const dbXp = Number((row as any)?.total_points ?? 0);
-        const captureStats = await getCaptureStats(userKey, dbXp);
-        if (mounted) {
-          setEcoXp(captureStats.totalPoints);
-          setStats(captureStats);
+        if (row && mounted) {
+          setEcoXp(Number((row as any).total_points ?? 0));
         }
       }
     })();
@@ -81,25 +76,21 @@ export function ProfileScreen() {
         setIsLoggedIn(Boolean(user));
         const name =
           user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
-        const userKey = user?.id || user?.email || "guest";
         setUsername(name);
         setUserEmail(user?.email || "");
-        setStatsUserKey(userKey);
+        setStatsUserKey(user?.id || user?.email || "guest");
 
-        // Re-resolve unified XP on auth change
+        // Fetch EcoXP from leaderboard_scores
         if (user?.id) {
           (async () => {
             const { data: row } = await supabase
               .from("leaderboard_scores")
               .select("total_points")
               .eq("user_id", user.id)
-              .maybeSingle();
+              .single();
 
-            const dbXp = Number((row as any)?.total_points ?? 0);
-            const captureStats = await getCaptureStats(userKey, dbXp);
-            if (mounted) {
-              setEcoXp(captureStats.totalPoints);
-              setStats(captureStats);
+            if (row && mounted) {
+              setEcoXp(Number((row as any).total_points ?? 0));
             }
           })();
         }
@@ -187,14 +178,12 @@ export function ProfileScreen() {
         user.user_metadata?.name || user.email?.split("@")[0] || "Guest";
       const userKey = user.id || user.email || "guest";
       const dbXp = await fetchUserEcoXpFromDb(user.id);
-      const captureStats = await getCaptureStats(userKey, dbXp);
 
       setUsername(name);
       setUserEmail(user.email || "");
       setStatsUserKey(userKey);
-      // Use the unified totalPoints (max of DB and local) as the single source of truth
-      setEcoXp(captureStats.totalPoints);
-      setStats(captureStats);
+      setEcoXp(dbXp);
+      setStats(await getCaptureStats(userKey, dbXp));
     } catch {
       // Keep profile usable when refresh fails offline.
     }
@@ -226,9 +215,10 @@ export function ProfileScreen() {
     return () => loop.stop();
   }, [pulse]);
 
-  // ecoXp is always sourced from DB (leaderboard_scores) and is the single
-  // source of truth for both the Total EcoXP header and the Stats ECO XP tile.
-  const totalEcoXp = ecoXp;
+  const totalEcoXp = useMemo(
+    () => ecoXp ?? stats?.totalPoints ?? 0,
+    [ecoXp, stats?.totalPoints],
+  );
   const level = useMemo(
     () => Math.floor(totalEcoXp / XP_PER_LEVEL) + 1,
     [totalEcoXp],
@@ -327,7 +317,7 @@ export function ProfileScreen() {
               for next level
             </Text>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: levelProgress }]} />
+              <View style={[styles.progressFill, { width: levelProgress as any }]} />
             </View>
             <Text style={styles.progressLabel}>
               {levelProgress} to level {level + 1}
@@ -367,7 +357,7 @@ export function ProfileScreen() {
                 bg: "#dcfce7",
                 border: "#86efac",
                 label: "ECO XP",
-                value: ecoXp.toLocaleString(),
+                value: String(ecoXp || (stats?.totalPoints ?? 0)),
                 sub: "Total EcoXP",
               },
               {

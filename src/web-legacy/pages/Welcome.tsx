@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router";
-import earthIllustration from "../../../assets/earth_illustration.png";
+// @ts-ignore
+import earthIllustration from "../../../../assets/earth_illustration.png";
 
 export function Welcome() {
   const navigate = useNavigate();

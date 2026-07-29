@@ -9,7 +9,7 @@ import {
   Trash2,
   Sparkles,
 } from "lucide-react";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 const XP_PER_LEVEL = 5000;
 
