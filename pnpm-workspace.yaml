@@ -1,5 +1,5 @@
 packages:
   - '.'
 allowBuilds:
-  '@tailwindcss/oxide': true
   esbuild: true
+  unrs-resolver: true

@@ -77,9 +77,12 @@ export function RegisterScreen() {
       });
 
       if (signInError) {
-        // Some projects require email confirmation before login.
-        // Still send users to Home as requested.
-        router.replace("/(tabs)/home");
+        // Some projects require email confirmation before login — there is
+        // no session yet, so don't pretend the user is signed in.
+        setError(
+          "Account created. Check your email to confirm it, then log in.",
+        );
+        router.push("/(tabs)/profile");
         return;
       }
 
@@ -180,7 +183,7 @@ export function RegisterScreen() {
         }
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => router.replace("/(tabs)/home")} style={styles.skip}>
+      <TouchableOpacity onPress={() => router.push("/(tabs)/profile")} style={styles.skip}>
         <Text style={styles.skipText}>Already have an account? Login</Text>
       </TouchableOpacity>
     </ScrollView>

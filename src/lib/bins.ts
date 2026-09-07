@@ -67,12 +67,12 @@ export async function loadBins(): Promise<BinMarker[]> {
 
     const bins = data
       .map((row) => ({
-        id: String((row as any).id || ""),
-        latitude: Number((row as any).latitude || 0),
-        longitude: Number((row as any).longitude || 0),
-        source: (["current", "manual"].includes((row as any).source)
-          ? (row as any).source
-          : "manual") as "current" | "manual",
+        id: String(row.id || ""),
+        latitude: Number(row.latitude || 0),
+        longitude: Number(row.longitude || 0),
+        source: (row.source === "current" ? "current" : "manual") as
+          | "current"
+          | "manual",
       }))
       .filter(
         (bin) =>
@@ -152,34 +152,56 @@ export async function removeBinFromDatabase(id: string): Promise<boolean> {
   }
 
   try {
-    const { error } = await supabase.from("bins").delete().eq("id", id);
+    // .select() after delete so we get back the rows that were actually
+    // deleted — an RLS-denied delete (not the owner) returns no error at
+    // all, just zero affected rows, so checking `error` alone would report
+    // false success.
+    const { data, error } = await supabase
+      .from("bins")
+      .delete()
+      .eq("id", id)
+      .select("id");
 
     if (error) {
       console.error("Failed to remove bin from Supabase:", error);
       return false;
     }
 
-    return true;
+    return Array.isArray(data) && data.length > 0;
   } catch (err) {
     console.error("Error removing bin:", err);
     return false;
   }
 }
 
+export type RealtimeConnectionStatus = "connected" | "reconnecting";
+
+const RECONNECT_DELAY_MS = 4000;
+
 /**
  * Subscribe to real-time changes to the bins table.
- * Calls the callback whenever bins are added, updated, or deleted.
- * Returns an unsubscribe function.
+ * Calls `onUpdate` whenever bins are added, updated, or deleted, and
+ * (optionally) `onStatusChange` when the connection drops or recovers, so
+ * the UI can show a "reconnecting" indicator instead of silently going
+ * stale. Returns an unsubscribe function.
  */
 export function subscribeToBinsRealtimeUpdates(
   onUpdate: (bins: BinMarker[]) => void,
+  onStatusChange?: (status: RealtimeConnectionStatus) => void,
 ): (() => void) | null {
   if (!supabase) {
     return null;
   }
 
-  try {
-    const subscription = supabase
+  const client = supabase;
+  let unsubscribed = false;
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  let currentChannel: ReturnType<typeof client.channel> | null = null;
+
+  const connect = () => {
+    if (unsubscribed) return;
+
+    currentChannel = client
       .channel("bins-realtime")
       .on(
         "postgres_changes",
@@ -191,19 +213,45 @@ export function subscribeToBinsRealtimeUpdates(
         async () => {
           // When any change occurs, fetch the full bins list
           const updatedBins = await loadBins();
-          onUpdate(updatedBins);
+          if (!unsubscribed) onUpdate(updatedBins);
         },
       )
       .subscribe((status) => {
-        console.log("Bins subscription status:", status);
-      });
+        if (unsubscribed) return;
 
-    // Return unsubscribe function
-    return () => {
-      supabase.removeChannel(subscription);
-    };
+        if (status === "SUBSCRIBED") {
+          onStatusChange?.("connected");
+          return;
+        }
+
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("Bins realtime subscription failed:", status);
+          onStatusChange?.("reconnecting");
+
+          if (currentChannel) {
+            client.removeChannel(currentChannel);
+            currentChannel = null;
+          }
+          // Supabase's client already retries the underlying socket on
+          // transient network drops; this catches channel-level failures
+          // that don't self-heal, with a simple flat retry (not infinite
+          // backoff — a single stuck retry loop is not worth the added
+          // complexity for a map feature at this scale).
+          retryTimeout = setTimeout(connect, RECONNECT_DELAY_MS);
+        }
+      });
+  };
+
+  try {
+    connect();
   } catch (err) {
     console.error("Error setting up bins real-time subscription:", err);
     return null;
   }
+
+  return () => {
+    unsubscribed = true;
+    if (retryTimeout) clearTimeout(retryTimeout);
+    if (currentChannel) client.removeChannel(currentChannel);
+  };
 }

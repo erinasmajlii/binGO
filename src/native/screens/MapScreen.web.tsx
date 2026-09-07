@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BinMarker, loadBins } from "../../lib/bins";
@@ -51,6 +51,11 @@ export function MapScreen() {
 
         <View style={styles.listSection}>
           <Text style={styles.sectionTitle}>Nearby Locations ({bins.length})</Text>
+          {loading ? (
+            <ActivityIndicator size="small" color="#10b981" style={{ marginVertical: 12 }} />
+          ) : bins.length === 0 ? (
+            <Text style={styles.binCoords}>No bins reported yet.</Text>
+          ) : null}
           {bins.map((bin, index) => (
             <View key={bin.id || index} style={styles.binItem}>
               <Ionicons name="trash-outline" size={20} color="#10b981" />

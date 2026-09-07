@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Run all BinGO Supabase setup SQL in order (linked project).
+ * Run all BinGO Supabase migrations in order (linked project).
  * Usage: npm run supabase:setup
  */
 import { spawnSync } from "node:child_process";
@@ -8,14 +8,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const setupDir = path.join(root, "supabase_setup");
+const setupDir = path.join(root, "supabase", "migrations");
 
 const files = [
-  "leaderboard.sql",
-  "cleanup_leaderboard_duplicates.sql",
-  "display_exp_view.sql",
-  "realtime.sql",
-  "upsert_user_score.sql",
+  "0001_schema.sql",
+  "0002_security_policies.sql",
+  "0003_seed_demo_data.sql",
 ];
 
 function run(file) {
@@ -38,17 +36,11 @@ console.log("BinGO Supabase setup");
 for (const file of files) run(file);
 
 console.log("\n>> verify leaderboard");
+const verifyQuery =
+  "SELECT display_name, total_points, user_id FROM public.leaderboard_scores ORDER BY total_points DESC;";
 const verify = spawnSync(
   "supabase",
-  [
-    "db",
-    "query",
-    "--linked",
-    "--agent=no",
-    "-o",
-    "table",
-    "SELECT display_name, total_points, user_id FROM public.leaderboard_scores ORDER BY total_points DESC;",
-  ],
+  ["db", "query", "--linked", "--agent=no", "-o", "table", `"${verifyQuery}"`],
   { cwd: root, encoding: "utf8", shell: true },
 );
 if (verify.stdout) process.stdout.write(verify.stdout);

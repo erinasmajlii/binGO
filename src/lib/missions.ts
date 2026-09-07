@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { supabase } from "./supabase";
 
 export type Mission = {
   id: string;
@@ -33,8 +34,17 @@ export type MissionProgress = {
   completed: boolean;
 };
 
+export type ClaimMissionResult =
+  | { status: "claimed"; newTotal: number }
+  | { status: "already_claimed" }
+  | { status: "error"; message: string };
+
 const STORAGE_KEY_DAILY = "bingo_missions_daily_v1";
 const STORAGE_KEY_WEEKLY = "bingo_missions_weekly_v1";
+
+function getStorageKey(base: string, userKey: string): string {
+  return `${base}:${userKey}`;
+}
 
 // Sample mission pools - in a real app, these would come from an API
 const DAILY_MISSION_POOL: Mission[] = [
@@ -144,7 +154,13 @@ const WEEKLY_MISSION_POOL: Mission[] = [
 ];
 
 function getRandomMissions(pool: Mission[], count: number): Mission[] {
-  const shuffled = [...pool].sort(() => 0.5 - Math.random());
+  // Fisher-Yates: sort(() => 0.5 - Math.random()) is a well-known broken
+  // shuffle that does not produce a uniform permutation.
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
   return shuffled.slice(0, Math.min(count, pool.length));
 }
 
@@ -163,6 +179,30 @@ function getNextWeekReset(): number {
   const daysUntilMonday = (8 - now.getDay()) % 7 || 7;
   const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysUntilMonday, 0, 0, 0, 0);
   return nextMonday.getTime();
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/**
+ * A stable key identifying the current reset period for a category (e.g.
+ * '2026-09-07' for daily, or the Monday date of the current week for
+ * weekly). Sent to the claim_mission RPC so the server can enforce
+ * "once per period" independent of any device's local clock quirks beyond
+ * this key itself — it only needs to change when a new period starts.
+ */
+function getPeriodKey(category: MissionCategory): string {
+  const now = new Date();
+
+  if (category === "daily") {
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  }
+
+  const dayOfWeek = now.getDay(); // 0=Sun..6=Sat
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday);
+  return `${monday.getFullYear()}-${pad2(monday.getMonth() + 1)}-${pad2(monday.getDate())}`;
 }
 
 async function loadStoredMissions(key: string): Promise<StoredMissions | null> {
@@ -194,8 +234,8 @@ async function saveStoredMissions(key: string, missions: StoredMissions): Promis
   }
 }
 
-async function ensureStoredMissions(category: MissionCategory): Promise<StoredMissions> {
-  const key = category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY;
+async function ensureStoredMissions(category: MissionCategory, userKey = "guest"): Promise<StoredMissions> {
+  const key = getStorageKey(category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY, userKey);
   const stored = await loadStoredMissions(key);
   const now = getNow();
 
@@ -221,36 +261,36 @@ async function ensureStoredMissions(category: MissionCategory): Promise<StoredMi
   return updated;
 }
 
-export async function getDailyMissions(): Promise<Mission[]> {
-  const stored = await ensureStoredMissions("daily");
+export async function getDailyMissions(userKey = "guest"): Promise<Mission[]> {
+  const stored = await ensureStoredMissions("daily", userKey);
   return stored.missions;
 }
 
-export async function getWeeklyMissions(): Promise<Mission[]> {
-  const stored = await ensureStoredMissions("weekly");
+export async function getWeeklyMissions(userKey = "guest"): Promise<Mission[]> {
+  const stored = await ensureStoredMissions("weekly", userKey);
   return stored.missions;
 }
 
-export async function getDailyMissionState(): Promise<StoredMissions> {
-  return ensureStoredMissions("daily");
+export async function getDailyMissionState(userKey = "guest"): Promise<StoredMissions> {
+  return ensureStoredMissions("daily", userKey);
 }
 
-export async function getWeeklyMissionState(): Promise<StoredMissions> {
-  return ensureStoredMissions("weekly");
+export async function getWeeklyMissionState(userKey = "guest"): Promise<StoredMissions> {
+  return ensureStoredMissions("weekly", userKey);
 }
 
-export async function getFirstDailyMission(): Promise<Mission | null> {
-  const missions = await getDailyMissions();
+export async function getFirstDailyMission(userKey = "guest"): Promise<Mission | null> {
+  const missions = await getDailyMissions(userKey);
   return missions.length > 0 ? missions[0] : null;
 }
 
-export async function getFirstWeeklyMission(): Promise<Mission | null> {
-  const missions = await getWeeklyMissions();
+export async function getFirstWeeklyMission(userKey = "guest"): Promise<Mission | null> {
+  const missions = await getWeeklyMissions(userKey);
   return missions.length > 0 ? missions[0] : null;
 }
 
-export async function forceMissionsRefresh(category: MissionCategory): Promise<Mission[]> {
-  const key = category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY;
+export async function forceMissionsRefresh(category: MissionCategory, userKey = "guest"): Promise<Mission[]> {
+  const key = getStorageKey(category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY, userKey);
   const pool = category === "daily" ? DAILY_MISSION_POOL : WEEKLY_MISSION_POOL;
   const now = getNow();
   const nextRefresh = category === "daily" ? getMidnightTonight() : getNextWeekReset();
@@ -283,9 +323,21 @@ export function getMissionProgress(mission: Mission, context: MissionProgressCon
   };
 }
 
-export async function claimMissionReward(category: MissionCategory, missionId: string): Promise<StoredMissions> {
-  const key = category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY;
-  const state = await ensureStoredMissions(category);
+/**
+ * Local-only claim bookkeeping. This is the fast-path cache that drives the
+ * "Claimed" UI state instantly — it is NOT the source of truth for whether
+ * XP was actually granted once a real user session exists (see
+ * claimMissionRemote below, which is server-authoritative and dedupes
+ * across devices). Guests (no session) have no server to claim against, so
+ * this remains the only bookkeeping for them.
+ */
+export async function claimMissionReward(
+  category: MissionCategory,
+  missionId: string,
+  userKey = "guest",
+): Promise<StoredMissions> {
+  const key = getStorageKey(category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY, userKey);
+  const state = await ensureStoredMissions(category, userKey);
 
   if (state.claimedMissionIds.includes(missionId)) {
     return state;
@@ -300,7 +352,92 @@ export async function claimMissionReward(category: MissionCategory, missionId: s
   return updated;
 }
 
-export async function isMissionClaimed(category: MissionCategory, missionId: string): Promise<boolean> {
-  const state = await ensureStoredMissions(category);
+export async function isMissionClaimed(
+  category: MissionCategory,
+  missionId: string,
+  userKey = "guest",
+): Promise<boolean> {
+  const state = await ensureStoredMissions(category, userKey);
   return state.claimedMissionIds.includes(missionId);
+}
+
+/**
+ * Server-authoritative claim: atomically records the claim in
+ * `mission_claims` and awards XP via the `claim_mission` RPC in one
+ * transaction (see supabase/migrations/0005_mission_claims.sql). A second
+ * device (or a reinstall) attempting to claim the same
+ * (category, mission, period) is rejected with "already_claimed" instead of
+ * granting XP twice.
+ *
+ * Requires a real session — callers should fall back to the local-only
+ * claimMissionReward()+manual XP bookkeeping for guests.
+ */
+export async function claimMissionRemote(
+  category: MissionCategory,
+  mission: Mission,
+  displayName: string,
+  userKey = "guest",
+): Promise<ClaimMissionResult> {
+  if (!supabase) {
+    return { status: "error", message: "Not connected to the server." };
+  }
+
+  const { data, error } = await supabase.rpc("claim_mission", {
+    p_category: category,
+    p_mission_id: mission.id,
+    p_period_key: getPeriodKey(category),
+    p_reward_xp: mission.rewardXP,
+    p_display_name: displayName,
+  });
+
+  if (error) {
+    const alreadyClaimed =
+      error.code === "23505" || error.message.toLowerCase().includes("already claimed");
+
+    if (alreadyClaimed) {
+      // Server says it's already claimed (e.g. from another device) —
+      // sync the local cache so the UI reflects that immediately.
+      await claimMissionReward(category, mission.id, userKey);
+      return { status: "already_claimed" };
+    }
+
+    return { status: "error", message: error.message };
+  }
+
+  await claimMissionReward(category, mission.id, userKey);
+  return { status: "claimed", newTotal: Number(data ?? 0) };
+}
+
+/**
+ * Pulls the current user's own claimed-mission rows for this category's
+ * active period from the server and merges them into the local cache, so a
+ * second device shows "Claimed" correctly even before anyone taps claim on
+ * it. RLS already scopes mission_claims reads to the caller's own rows.
+ */
+export async function syncClaimedMissionsFromServer(
+  category: MissionCategory,
+  userKey = "guest",
+): Promise<void> {
+  if (!supabase) return;
+
+  try {
+    const { data, error } = await supabase
+      .from("mission_claims")
+      .select("mission_id")
+      .eq("category", category)
+      .eq("period_key", getPeriodKey(category));
+
+    if (error || !Array.isArray(data)) return;
+
+    const state = await ensureStoredMissions(category, userKey);
+    const remoteIds = data.map((row) => row.mission_id);
+    const merged = Array.from(new Set([...state.claimedMissionIds, ...remoteIds]));
+
+    if (merged.length !== state.claimedMissionIds.length) {
+      const key = getStorageKey(category === "daily" ? STORAGE_KEY_DAILY : STORAGE_KEY_WEEKLY, userKey);
+      await saveStoredMissions(key, { ...state, claimedMissionIds: merged });
+    }
+  } catch {
+    // Best-effort sync — local cache stays as-is if this fails (e.g. offline).
+  }
 }

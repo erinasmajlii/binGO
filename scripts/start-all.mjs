@@ -66,11 +66,14 @@ process.on("SIGTERM", () => {
   shutdown();
 });
 
-console.log("[start:all] Starting Expo (LAN) and AI server...");
+const useTunnel = process.argv.includes("--tunnel");
+const expoScript = useTunnel ? "start:go:tunnel" : "start:go";
+
+console.log(`[start:all] Starting Expo (${useTunnel ? "tunnel" : "LAN"}) and AI server...`);
 if (process.platform === "win32") {
-  start("expo", "cmd", ["/c", "npm", "run", "start:go"]);
+  start("expo", "cmd", ["/c", "npm", "run", expoScript]);
   start("ai", "cmd", ["/c", "npm", "run", "ai:start"]);
 } else {
-  start("expo", "npm", ["run", "start:go"]);
+  start("expo", "npm", ["run", expoScript]);
   start("ai", "npm", ["run", "ai:start"]);
 }

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
-import { supabase } from "../../lib/supabase";
+import { useRouter, useFocusEffect } from "expo-router";
+import { useAuth } from "../../lib/AuthContext";
 import {
   fetchUserEcoXpFromDb,
   getCaptureStats,
@@ -14,9 +13,7 @@ const XP_PER_LEVEL = 5000;
 
 export function HomeScreen() {
   const router = useRouter();
-  const [username, setUsername] = useState("Guest");
-  const [statsUserKey, setStatsUserKey] = useState("guest");
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user, displayName, userKey } = useAuth();
   const [ecoXp, setEcoXp] = useState(0);
   const [streakDays, setStreakDays] = useState(0);
   const [cleanupCount, setCleanupCount] = useState(0);
@@ -24,60 +21,29 @@ export function HomeScreen() {
   const goToProfile = () => router.push("/(tabs)/profile");
   const level = Math.floor(ecoXp / XP_PER_LEVEL) + 1;
 
-  useEffect(() => {
-    if (!supabase) return;
-
-    let mounted = true;
-
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
-      if (!mounted) return;
-
-      const name =
-        user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
-      setUsername(name);
-      setStatsUserKey(user?.id || user?.email || "guest");
-      setUserId(user?.id ?? null);
-    })();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user;
-      const name =
-        user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
-      setUsername(name);
-      setStatsUserKey(user?.id || user?.email || "guest");
-      setUserId(user?.id ?? null);
-    });
-
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
-      const load = async () => {
-        let dbXp = 0;
-        if (userId) {
-          dbXp = await fetchUserEcoXpFromDb(userId);
-          setEcoXp(dbXp);
-        } else {
-          setEcoXp(0);
-        }
+      let cancelled = false;
 
-        const stats = await getCaptureStats(statsUserKey, dbXp);
+      const load = async () => {
+        const dbXp = user ? await fetchUserEcoXpFromDb(user.id) : 0;
+        if (cancelled) return;
+        setEcoXp(dbXp);
+
+        const stats = await getCaptureStats(userKey, dbXp);
+        if (cancelled) return;
         setStreakDays(stats.streak);
         setCleanupCount(stats.total);
       };
 
       load();
-      return () => {};
-    }, [statsUserKey, userId]),
+      return () => {
+        cancelled = true;
+      };
+    }, [userKey, user]),
   );
 
-  const userInitial = username.charAt(0).toUpperCase();
+  const userInitial = displayName.charAt(0).toUpperCase();
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

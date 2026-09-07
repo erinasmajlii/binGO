@@ -6,46 +6,27 @@ import { useState, useRef, useEffect } from "react";
 import { router } from "expo-router";
 import * as Location from "expo-location";
 import { BinMarker, loadBins } from "../../lib/bins";
+import { distanceInMeters } from "../../lib/geo";
 import { setActiveRoute } from "../../lib/route";
-import { CATEGORY_LABELS, classifyTrashPhoto, saveCaptureRecord } from "../../lib/trashStats";
+import { CATEGORY_LABELS, saveCaptureRecord } from "../../lib/trashStats";
 import { classifyTrashPhotoWithModel } from "../../lib/trashClassifierApi";
-import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../lib/AuthContext";
 
 export function ReportScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
+  const [, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
   const [captureLabel, setCaptureLabel] = useState<string | null>(null);
+  const [captureError, setCaptureError] = useState<string | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
-  const [currentUserKey, setCurrentUserKey] = useState<string | undefined>(undefined);
+  const { userKey: currentUserKey } = useAuth();
+  const isMountedRef = useRef(true);
 
-  // Resolve the logged-in user's key once on mount so XP is written
-  // under the correct AsyncStorage + leaderboard key.
   useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
-      const user = data.session?.user;
-      if (user) setCurrentUserKey(user.id || user.email || undefined);
-    });
+    return () => {
+      isMountedRef.current = false;
+    };
   }, []);
-
-  const toRadians = (value: number) => (value * Math.PI) / 180;
-
-  const distanceInMeters = (
-    fromLat: number,
-    fromLon: number,
-    toLat: number,
-    toLon: number
-  ) => {
-    const earthRadius = 6371000;
-    const dLat = toRadians(toLat - fromLat);
-    const dLon = toRadians(toLon - fromLon);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(toRadians(fromLat)) * Math.cos(toRadians(toLat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  };
 
   const getNearestBin = (bins: BinMarker[], latitude: number, longitude: number) => {
     if (bins.length === 0) return null;
@@ -72,33 +53,43 @@ export function ReportScreen() {
     }
     setCapturedPhotoUri(null);
     setCaptureLabel(null);
+    setCaptureError(null);
     setShowCamera(true);
   };
 
   const takePhoto = async () => {
-    if (cameraRef.current) {
+    if (!cameraRef.current) return;
+
+    setCaptureError(null);
+
+    try {
       const photo = await cameraRef.current.takePictureAsync();
+      if (!isMountedRef.current) return;
       setCapturedPhotoUri(photo.uri);
       setCaptureLabel("Analyzing...");
 
-      let classified;
-      try {
-        classified = await classifyTrashPhotoWithModel(photo.uri);
-      } catch {
-        classified = await classifyTrashPhoto(photo.uri);
-      }
+      const classified = await classifyTrashPhotoWithModel(photo.uri);
+      if (!isMountedRef.current) return;
 
       await saveCaptureRecord(photo.uri, classified.category, classified.confidence, currentUserKey);
+      if (!isMountedRef.current) return;
 
-      const detectionText = CATEGORY_LABELS[classified.category];
-      setCaptureLabel(detectionText);
+      // Be honest about how this category was determined — only "model" is a
+      // real trained classifier. Both heuristic paths are best-effort guesses.
+      const detectionText =
+        classified.source === "model"
+          ? CATEGORY_LABELS[classified.category]
+          : `${CATEGORY_LABELS[classified.category]} (estimated)`;
       let statusText = `Detected ${detectionText}. Opening map...`;
 
       let bins = await loadBins();
+      if (!isMountedRef.current) return;
 
       if (bins.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, 300));
+        if (!isMountedRef.current) return;
         bins = await loadBins();
+        if (!isMountedRef.current) return;
       }
 
       try {
@@ -127,12 +118,22 @@ export function ReportScreen() {
         statusText = `Detected ${detectionText}. Saved report, opening map.`;
       }
 
+      if (!isMountedRef.current) return;
+      setCaptureLabel(statusText);
+
       setTimeout(() => {
+        if (!isMountedRef.current) return;
         setCapturedPhotoUri(null);
         setCaptureLabel(null);
         setShowCamera(false);
         router.push("/(tabs)/map");
       }, 1300);
+    } catch (err) {
+      console.error("Capture failed:", err);
+      if (!isMountedRef.current) return;
+      setCapturedPhotoUri(null);
+      setCaptureLabel(null);
+      setCaptureError("Couldn't capture that photo. Please try again.");
     }
   };
 
@@ -156,6 +157,13 @@ export function ReportScreen() {
           </View>
         ) : null}
 
+        {captureError ? (
+          <View style={[styles.overlayBadge, styles.overlayBadgeError]}>
+            <Ionicons name="warning" size={16} color="#fff7ed" />
+            <Text style={styles.overlayBadgeText}>{captureError}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.cameraControls}>
           <TouchableOpacity style={[styles.captureButton, capturedPhotoUri ? styles.captureButtonDisabled : null]} onPress={takePhoto} disabled={Boolean(capturedPhotoUri)}>
             <Ionicons name="camera" size={30} color="#fff" />
@@ -163,6 +171,7 @@ export function ReportScreen() {
           <TouchableOpacity style={styles.closeButton} onPress={() => {
             setCapturedPhotoUri(null);
             setCaptureLabel(null);
+            setCaptureError(null);
             setShowCamera(false);
           }}>
             <Ionicons name="close" size={30} color="#fff" />
@@ -261,6 +270,11 @@ const styles = StyleSheet.create({
     color: "#ecfeff",
     fontWeight: "700",
     fontSize: 14,
+  },
+  overlayBadgeError: {
+    top: 106,
+    backgroundColor: "rgba(153,27,27,0.92)",
+    borderColor: "#fca5a5",
   },
   cameraControls: {
     position: "absolute",

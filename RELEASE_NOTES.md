@@ -1,5 +1,12 @@
 # Release Notes - Mission System, Leaderboard & Real-Time Map Sync
 
+> **Historical snapshot — not current setup instructions.** This document
+> describes the state of the project as of May 3, 2026, including a
+> `supabase_setup/` deployment path that has since been replaced. For
+> current setup, see [`README.md`](README.md), [`supabase/README.md`](supabase/README.md),
+> and [`server/README.md`](server/README.md). For what's changed since,
+> see [`ROADMAP.md`](ROADMAP.md).
+
 **Commit:** `91def5e`  
 **Branch:** master  
 **Date:** May 3, 2026

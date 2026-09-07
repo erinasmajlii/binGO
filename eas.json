@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "version": ">= 13.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_CLASSIFIER_API_URL": "https://REPLACE_WITH_STAGING_CLASSIFIER_URL"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_CLASSIFIER_API_URL": "https://REPLACE_WITH_PRODUCTION_CLASSIFIER_URL"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

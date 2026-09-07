@@ -263,16 +263,17 @@ async function getCurrentUserIdentity() {
   }
 }
 
+/** Largest single increment the increment_leaderboard_score RPC accepts (must match the SQL function). */
+const MAX_XP_PER_CALL = 2000;
+
 /**
- * Increment EcoXP in the DB for the current user.
- *
- * Strategy:
- *  1. Write to `leaderboard_scores` table.
- *     New value = max(current total_points + amount, all local XP accumulated).
- *     This means:
- *       - Hardcoded base scores (e.g. Art = 10 000) are preserved and grow.
- *       - Previously unsynced local scans are caught up in the same write.
- *  2. The `display_exp` view is read-only and will automatically reflect the changes.
+ * Atomically increment the current user's EcoXP via the
+ * `increment_leaderboard_score` Postgres RPC (SECURITY DEFINER — see
+ * supabase/migrations/0002_security_policies.sql). The client can no longer
+ * write leaderboard_scores.total_points directly: RLS denies it. The RPC
+ * does a single atomic `total_points = total_points + amount`, so concurrent
+ * writes (two devices, retries) can no longer clobber each other, and the
+ * server rejects any amount outside 1..MAX_XP_PER_CALL.
  */
 async function incrementUserEcoXpInDb(
   amount: number,
@@ -283,66 +284,42 @@ async function incrementUserEcoXpInDb(
   const identity = await getCurrentUserIdentity();
   if (!identity) return null;
 
+  const clamped = Math.min(amount, MAX_XP_PER_CALL);
+
   try {
-    // --- Read local total (includes the new record already saved by the caller) ---
+    const { data, error } = await supabase.rpc("increment_leaderboard_score", {
+      p_amount: clamped,
+      p_display_name: identity.displayName,
+    });
+
+    if (error) {
+      console.error("[XP] increment_leaderboard_score error:", error.message);
+      return null;
+    }
+
+    const newTotal = Number(data ?? 0);
+
+    // Keep the local "how much have we synced" ledger in step so
+    // syncCurrentUserLeaderboardScore() only ever sends the outstanding delta.
     const records = await readRecordsForUser(userKey);
     const missionBonusPoints = await readMissionBonusPoints(userKey);
     const localTotal =
       records.reduce((sum, item) => sum + item.points, 0) + missionBonusPoints;
-
-    // ── leaderboard_scores (primary store) ───────────────────────────────
-    const { data: lbRow } = await supabase
-      .from("leaderboard_scores")
-      .select("total_points")
-      .eq("user_id", identity.id)
-      .maybeSingle();
-
-    const currentLbXp = Number((lbRow as any)?.total_points ?? 0);
-    // Preserve manually-set base scores (e.g. Art = 10 000) + add new XP.
-    // Also catches up previously-unsynced local scans.
-    const newLbXp = Math.max(currentLbXp + amount, localTotal);
-
-    if (lbRow !== null) {
-      // Row exists → UPDATE
-      const { error: lbUpdErr } = await supabase
-        .from("leaderboard_scores")
-        .update({
-          display_name: identity.displayName,
-          total_points: newLbXp,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", identity.id);
-      if (lbUpdErr) {
-        console.error("[XP] leaderboard update error:", lbUpdErr.message);
-        return null;
-      }
-    } else {
-      // No row yet → INSERT
-      const { error: lbInsErr } = await supabase
-        .from("leaderboard_scores")
-        .insert({
-          user_id: identity.id,
-          display_name: identity.displayName,
-          total_points: newLbXp,
-          updated_at: new Date().toISOString(),
-        });
-      if (lbInsErr) {
-        console.error("[XP] leaderboard insert error:", lbInsErr.message);
-        return null;
-      }
-    }
-
     await writeSyncedLocalXp(localTotal, userKey);
-    console.log(
-      `[XP] +${amount} → leaderboard=${newLbXp} localTotal=${localTotal}`,
-    );
-    return newLbXp;
+
+    return newTotal;
   } catch (ex) {
     console.error("[XP] incrementUserEcoXpInDb exception:", ex);
     return null;
   }
 }
 
+/**
+ * Catch up any locally-recorded XP that never made it to the server (e.g. a
+ * previous increment call failed while offline). Sends the outstanding
+ * delta in chunks of at most MAX_XP_PER_CALL through the same atomic,
+ * validated RPC as incrementUserEcoXpInDb.
+ */
 async function syncCurrentUserLeaderboardScore(
   userKey?: string,
 ): Promise<void> {
@@ -353,48 +330,31 @@ async function syncCurrentUserLeaderboardScore(
 
   const records = await readRecordsForUser(userKey);
   const missionBonusPoints = await readMissionBonusPoints(userKey);
-  const capturePoints = records.reduce((sum, item) => sum + item.points, 0);
-  const localTotal = capturePoints + missionBonusPoints;
+  const localTotal =
+    records.reduce((sum, item) => sum + item.points, 0) + missionBonusPoints;
+
+  const syncedLocalXp = await readSyncedLocalXp(userKey);
+  let outstanding = Math.max(0, localTotal - syncedLocalXp);
+  if (outstanding <= 0) return;
 
   try {
-    // ── leaderboard_scores (primary store) ───────────────────────────────────
-    const { data: lbRow } = await supabase
-      .from("leaderboard_scores")
-      .select("total_points")
-      .eq("user_id", identity.id)
-      .maybeSingle();
+    let synced = syncedLocalXp;
+    while (outstanding > 0) {
+      const chunk = Math.min(outstanding, MAX_XP_PER_CALL);
+      const { error } = await supabase.rpc("increment_leaderboard_score", {
+        p_amount: chunk,
+        p_display_name: identity.displayName,
+      });
 
-    const dbTotal = Number((lbRow as any)?.total_points ?? 0);
-    const syncedLocalXp = await readSyncedLocalXp(userKey);
-    const delta = Math.max(0, localTotal - syncedLocalXp);
-    const newLbTotal =
-      dbTotal > localTotal && delta === 0 ? dbTotal : dbTotal + delta;
+      if (error) {
+        console.error("[XP] sync increment error:", error.message);
+        break;
+      }
 
-    if (lbRow !== null) {
-      const { error: lbUpdErr } = await supabase
-        .from("leaderboard_scores")
-        .update({
-          display_name: identity.displayName,
-          total_points: newLbTotal,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", identity.id);
-      if (lbUpdErr)
-        console.error("[XP] sync leaderboard update error:", lbUpdErr.message);
-    } else {
-      const { error: lbInsErr } = await supabase
-        .from("leaderboard_scores")
-        .insert({
-          user_id: identity.id,
-          display_name: identity.displayName,
-          total_points: newLbTotal,
-          updated_at: new Date().toISOString(),
-        });
-      if (lbInsErr)
-        console.error("[XP] sync leaderboard insert error:", lbInsErr.message);
+      synced += chunk;
+      outstanding -= chunk;
+      await writeSyncedLocalXp(synced, userKey);
     }
-
-    await writeSyncedLocalXp(localTotal, userKey);
   } catch (ex) {
     console.error("[XP] syncCurrentUserLeaderboardScore exception:", ex);
   }
@@ -416,7 +376,7 @@ export async function fetchUserEcoXpFromDb(userId: string): Promise<number> {
       .eq("user_id", userId)
       .maybeSingle();
 
-    const displayXp = Number((displayRow as any)?.ecoxp ?? 0);
+    const displayXp = Number(displayRow?.ecoxp ?? 0);
     if (displayXp > 0) return displayXp;
 
     // Fallback: leaderboard_scores
@@ -426,26 +386,37 @@ export async function fetchUserEcoXpFromDb(userId: string): Promise<number> {
       .eq("user_id", userId)
       .maybeSingle();
 
-    return Number((lbRow as any)?.total_points ?? 0);
+    return Number(lbRow?.total_points ?? 0);
   } catch {
     return 0;
   }
 }
 
+export type ClassificationSource = "model" | "heuristic-server" | "heuristic-local";
+
+/**
+ * Local, offline guess used only when the classifier server can't be
+ * reached at all. This is NOT real classification — it's a weighted random
+ * pick (dressed up with a plausible-looking confidence number) so the app
+ * still produces a category when fully offline. Callers must surface
+ * `source: "heuristic-local"` to the user rather than presenting this as AI.
+ */
 export async function classifyTrashPhoto(
   uri: string,
-): Promise<{ category: TrashCategory; confidence: number }> {
+): Promise<{ category: TrashCategory; confidence: number; source: ClassificationSource }> {
   const inferred = inferCategoryFromUri(uri);
   if (inferred) {
     return {
       category: inferred,
       confidence: toConfidence(0.86 + Math.random() * 0.1),
+      source: "heuristic-local",
     };
   }
 
   return {
     category: pickWeightedCategory(),
     confidence: toConfidence(0.65 + Math.random() * 0.25),
+    source: "heuristic-local",
   };
 }
 
@@ -523,8 +494,8 @@ export async function getGlobalLeaderboard(
     const realUsers = data
       .map((row) => ({
         rank: 0, // Will be set after sorting
-        name: String((row as any).display_name || "User"),
-        score: Number((row as any).total_points || 0),
+        name: String(row.display_name || "User"),
+        score: Number(row.total_points || 0),
       }))
       .filter((row) => row.score >= 0);
 

@@ -12,99 +12,68 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useRouter, useFocusEffect } from "expo-router";
+import * as Linking from "expo-linking";
 import {
   checkSupabaseReachable,
   getSupabaseConfigIssue,
   supabase,
 } from "../../lib/supabase";
+import { useAuth } from "../../lib/AuthContext";
 import { fetchUserEcoXpFromDb, getCaptureStats } from "../../lib/trashStats";
 
 const XP_PER_LEVEL = 5000;
 
 export function ProfileScreen() {
   const router = useRouter();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { user, isAuthenticated, isGuest, displayName, userKey, continueAsGuest, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
-  const [username, setUsername] = useState("Guest");
-  const [userEmail, setUserEmail] = useState("");
+  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [forgotPasswordStatus, setForgotPasswordStatus] = useState<string | null>(null);
+  const [sendingResetEmail, setSendingResetEmail] = useState(false);
   const [ecoXp, setEcoXp] = useState(0);
-  const [statsUserKey, setStatsUserKey] = useState("guest");
   const [stats, setStats] = useState<Awaited<
     ReturnType<typeof getCaptureStats>
   > | null>(null);
   const pulse = useRef(new Animated.Value(0)).current;
 
+  const userEmail = user?.email ?? "";
+
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !user?.id) {
+      setEcoXp(0);
+      return;
+    }
 
     let mounted = true;
 
     (async () => {
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
-      if (!mounted) return;
+      const { data: row } = await supabase
+        .from("leaderboard_scores")
+        .select("total_points")
+        .eq("user_id", user.id)
+        .single();
 
-      setIsLoggedIn(Boolean(user));
-      const name =
-        user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
-      setUsername(name);
-      setUserEmail(user?.email || "");
-      setStatsUserKey(user?.id || user?.email || "guest");
-
-      // Fetch EcoXP from leaderboard_scores
-      if (user?.id) {
-        const { data: row } = await supabase
-          .from("leaderboard_scores")
-          .select("total_points")
-          .eq("user_id", user.id)
-          .single();
-
-        if (row && mounted) {
-          setEcoXp(Number((row as any).total_points ?? 0));
-        }
+      if (row && mounted) {
+        setEcoXp(Number(row.total_points ?? 0));
       }
     })();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        const user = session?.user;
-        setIsLoggedIn(Boolean(user));
-        const name =
-          user?.user_metadata?.name || user?.email?.split("@")[0] || "Guest";
-        setUsername(name);
-        setUserEmail(user?.email || "");
-        setStatsUserKey(user?.id || user?.email || "guest");
-
-        // Fetch EcoXP from leaderboard_scores
-        if (user?.id) {
-          (async () => {
-            const { data: row } = await supabase
-              .from("leaderboard_scores")
-              .select("total_points")
-              .eq("user_id", user.id)
-              .single();
-
-            if (row && mounted) {
-              setEcoXp(Number((row as any).total_points ?? 0));
-            }
-          })();
-        }
-      },
-    );
-
     return () => {
       mounted = false;
-      listener.subscription.unsubscribe();
     };
-  }, []);
+  }, [user?.id]);
 
   const handleLogin = async () => {
     setAuthMessage(null);
+    setNeedsEmailConfirmation(false);
+    setResendStatus(null);
 
     if (!email.trim() || !password) {
       setAuthMessage("Email and password are required.");
@@ -139,6 +108,10 @@ export function ProfileScreen() {
 
       if (error) {
         setAuthMessage(error.message);
+        setNeedsEmailConfirmation(
+          error.code === "email_not_confirmed" ||
+            error.message.toLowerCase().includes("email not confirmed"),
+        );
         return;
       }
 
@@ -153,45 +126,90 @@ export function ProfileScreen() {
     }
   };
 
-  const handleLogout = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
+  const handleResendConfirmation = async () => {
+    if (!supabase || !email.trim()) return;
+
+    setResending(true);
+    setResendStatus(null);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+      });
+
+      setResendStatus(
+        error ? error.message : "Confirmation email sent. Check your inbox.",
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setResendStatus(message || "Could not resend the confirmation email.");
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleSendPasswordReset = async () => {
+    setForgotPasswordStatus(null);
+
+    if (!email.trim()) {
+      setForgotPasswordStatus("Enter your email above first.");
+      return;
+    }
+    if (!supabase) {
+      setForgotPasswordStatus("Supabase is not configured on this device.");
+      return;
     }
 
-    setIsLoggedIn(false);
-    setUsername("Guest");
-    setStatsUserKey("guest");
+    setSendingResetEmail(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: Linking.createURL("reset-password"),
+      });
+
+      setForgotPasswordStatus(
+        error
+          ? error.message
+          : "If an account exists for that email, a reset link has been sent.",
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setForgotPasswordStatus(message || "Could not send the reset email.");
+    } finally {
+      setSendingResetEmail(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
     setPassword("");
   };
 
-  const refreshProfileFromServer = useCallback(async () => {
-    if (!supabase) return;
+  const refreshProfileFromServer = useCallback(
+    async (isMounted: () => boolean) => {
+      if (!user?.id) {
+        setStats(await getCaptureStats(userKey));
+        return;
+      }
 
-    try {
-      await supabase.auth.refreshSession();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const name =
-        user.user_metadata?.name || user.email?.split("@")[0] || "Guest";
-      const userKey = user.id || user.email || "guest";
-      const dbXp = await fetchUserEcoXpFromDb(user.id);
-
-      setUsername(name);
-      setUserEmail(user.email || "");
-      setStatsUserKey(userKey);
-      setEcoXp(dbXp);
-      setStats(await getCaptureStats(userKey, dbXp));
-    } catch {
-      // Keep profile usable when refresh fails offline.
-    }
-  }, []);
+      try {
+        const dbXp = await fetchUserEcoXpFromDb(user.id);
+        if (!isMounted()) return;
+        setEcoXp(dbXp);
+        setStats(await getCaptureStats(userKey, dbXp));
+      } catch {
+        // Keep profile usable when refresh fails offline.
+      }
+    },
+    [user?.id, userKey],
+  );
 
   useFocusEffect(
     useCallback(() => {
-      refreshProfileFromServer();
+      let mounted = true;
+      refreshProfileFromServer(() => mounted);
+      return () => {
+        mounted = false;
+      };
     }, [refreshProfileFromServer]),
   );
 
@@ -230,60 +248,136 @@ export function ProfileScreen() {
     return `${Math.round(progress)}%`;
   }, [xpIntoLevel]);
 
-  if (!isLoggedIn) {
+  if (!isAuthenticated) {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <ScrollView contentContainerStyle={styles.loginContent}>
           <View style={styles.loginCard}>
-            <Text style={styles.loginTitle}>Login</Text>
-            <Text style={styles.loginNote}>
-              Use your registered email and password.
-            </Text>
+            {forgotPasswordMode ? (
+              <>
+                <Text style={styles.loginTitle}>Reset password</Text>
+                <Text style={styles.loginNote}>
+                  Enter your account email — we will send a link to set a new password.
+                </Text>
 
-            <Text style={styles.label}>EMAIL</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="name@example.com"
-              placeholderTextColor="#94a3b8"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-            />
+                <Text style={styles.label}>EMAIL</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="name@example.com"
+                  placeholderTextColor="#94a3b8"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={email}
+                  onChangeText={setEmail}
+                />
 
-            <Text style={styles.label}>PASSWORD</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter password"
-              placeholderTextColor="#94a3b8"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
+                {forgotPasswordStatus ? (
+                  <Text style={styles.resendStatus}>{forgotPasswordStatus}</Text>
+                ) : null}
 
-            {authMessage ? (
-              <Text style={styles.authError}>{authMessage}</Text>
-            ) : null}
+                <TouchableOpacity
+                  style={[styles.loginBtn, sendingResetEmail && styles.loginBtnDisabled]}
+                  onPress={handleSendPasswordReset}
+                  activeOpacity={0.85}
+                  disabled={sendingResetEmail}
+                >
+                  {sendingResetEmail ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Send reset link</Text>
+                  )}
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
-              onPress={handleLogin}
-              activeOpacity={0.85}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.loginBtnText}>Login</Text>
-              )}
-            </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.skipBtn}
+                  onPress={() => {
+                    setForgotPasswordMode(false);
+                    setForgotPasswordStatus(null);
+                  }}
+                >
+                  <Text style={styles.skipBtnText}>Back to login</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.loginTitle}>Login</Text>
+                <Text style={styles.loginNote}>
+                  Use your registered email and password.
+                </Text>
 
-            <TouchableOpacity
-              style={styles.skipBtn}
-              onPress={() => setIsLoggedIn(true)}
-            >
-              <Text style={styles.skipBtnText}>Skip for now</Text>
-            </TouchableOpacity>
+                <Text style={styles.label}>EMAIL</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="name@example.com"
+                  placeholderTextColor="#94a3b8"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={email}
+                  onChangeText={setEmail}
+                />
+
+                <Text style={styles.label}>PASSWORD</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter password"
+                  placeholderTextColor="#94a3b8"
+                  secureTextEntry
+                  value={password}
+                  onChangeText={setPassword}
+                />
+
+                <TouchableOpacity
+                  style={styles.forgotPasswordBtn}
+                  onPress={() => {
+                    setForgotPasswordMode(true);
+                    setAuthMessage(null);
+                    setForgotPasswordStatus(null);
+                  }}
+                >
+                  <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                </TouchableOpacity>
+
+                {authMessage ? (
+                  <Text style={styles.authError}>{authMessage}</Text>
+                ) : null}
+
+                {needsEmailConfirmation ? (
+                  <TouchableOpacity
+                    style={styles.resendBtn}
+                    onPress={handleResendConfirmation}
+                    disabled={resending}
+                  >
+                    <Text style={styles.resendBtnText}>
+                      {resending ? "Sending..." : "Resend confirmation email"}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {resendStatus ? (
+                  <Text style={styles.resendStatus}>{resendStatus}</Text>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
+                  onPress={handleLogin}
+                  activeOpacity={0.85}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Login</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.skipBtn}
+                  onPress={continueAsGuest}
+                >
+                  <Text style={styles.skipBtnText}>Skip for now</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -298,22 +392,21 @@ export function ProfileScreen() {
           <View style={styles.profileRow}>
             <View style={styles.avatarLarge}>
               <Text style={styles.avatarText}>
-                {username.charAt(0).toUpperCase()}
+                {displayName.charAt(0).toUpperCase()}
               </Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.usernameLabel}>USERNAME</Text>
-              <Text style={styles.username}>{username}</Text>
+              <Text style={styles.username}>{isGuest && !user ? "Guest" : displayName}</Text>
               {userEmail && <Text style={styles.userEmail}>{userEmail}</Text>}
             </View>
           </View>
 
           <View style={styles.xpBox}>
             <Text style={styles.xpLabel}>Total EcoXP</Text>
-            <Text style={styles.xpValue}>{ecoXp.toLocaleString()}</Text>
+            <Text style={styles.xpValue}>{totalEcoXp.toLocaleString()}</Text>
             <Text style={styles.xpSub}>
-              Level {Math.floor(ecoXp / XP_PER_LEVEL) + 1} •{" "}
-              {(XP_PER_LEVEL - (ecoXp % XP_PER_LEVEL)).toLocaleString()} needed
+              Level {level} • {xpRemaining.toLocaleString()} needed
               for next level
             </Text>
             <View style={styles.progressBar}>
@@ -357,7 +450,7 @@ export function ProfileScreen() {
                 bg: "#dcfce7",
                 border: "#86efac",
                 label: "ECO XP",
-                value: String(ecoXp || (stats?.totalPoints ?? 0)),
+                value: String(totalEcoXp),
                 sub: "Total EcoXP",
               },
               {
@@ -513,6 +606,11 @@ const styles = StyleSheet.create({
   loginBtnDisabled: { opacity: 0.7 },
   loginBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   authError: { color: "#dc2626", fontSize: 12, marginBottom: 10 },
+  forgotPasswordBtn: { alignSelf: "flex-end", marginBottom: 14, marginTop: -6 },
+  forgotPasswordText: { color: "#059669", fontSize: 13, fontWeight: "600" },
+  resendBtn: { alignSelf: "flex-start", marginBottom: 10 },
+  resendBtnText: { color: "#059669", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" },
+  resendStatus: { color: "#475569", fontSize: 12, marginBottom: 10 },
   skipBtn: {
     backgroundColor: "#ecfdf5",
     paddingVertical: 12,

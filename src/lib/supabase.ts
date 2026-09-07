@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from './database.types';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() || '';
@@ -39,12 +40,18 @@ const supabaseConfigIssue = getSupabaseConfigIssue();
 
 export const supabase =
   supabaseConfigIssue === null
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    ? createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
           storage: AsyncStorage,
           autoRefreshToken: true,
           persistSession: true,
           detectSessionInUrl: false,
+          // PKCE (not the default "implicit" flow) so the password-reset
+          // deep link carries a single `code` query param that
+          // exchangeCodeForSession() can redeem — far more reliable across
+          // native deep-link handoffs than parsing tokens out of a URL
+          // fragment, which isn't always preserved.
+          flowType: 'pkce',
         },
       })
     : null;

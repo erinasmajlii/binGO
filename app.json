@@ -2,6 +2,7 @@
   "expo": {
     "name": "binGO",
     "slug": "bingo-expo",
+    "scheme": "bingo",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -19,7 +20,11 @@
       }
     },
     "android": {
-      "permissions": ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.CAMERA"],
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA"
+      ],
       "config": {
         "googleMaps": {
           "apiKey": "YOUR_GOOGLE_MAPS_ANDROID_API_KEY"
@@ -27,6 +32,10 @@
       }
     },
     "web": {},
-    "sdkVersion": "54.0.0"
+    "sdkVersion": "57.0.0",
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ]
   }
 }

@@ -1,11 +1,11 @@
 import { useCallback, useState, useEffect, useMemo } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Modal } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router";
 import {
   awardMissionXp,
+  fetchUserEcoXpFromDb,
   getCaptureStats,
   getGlobalLeaderboard,
   LeaderboardEntry,
@@ -17,8 +17,11 @@ import {
   MissionCategory,
   getMissionProgress,
   claimMissionReward,
+  claimMissionRemote,
+  syncClaimedMissionsFromServer,
 } from "../../lib/missions";
-import { getSupabaseConfigIssue, checkSupabaseReachable, supabase } from "../../lib/supabase";
+import { getSupabaseConfigIssue, checkSupabaseReachable } from "../../lib/supabase";
+import { useAuth } from "../../lib/AuthContext";
 
 const rankStyle = (rank: number) => {
   if (rank === 1) return { bg: "#fef3c7", border: "#fde68a" };
@@ -34,46 +37,34 @@ export function MissionsScreen() {
   const [weeklyClaimedIds, setWeeklyClaimedIds] = useState<string[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [missionStats, setMissionStats] = useState<Awaited<ReturnType<typeof getCaptureStats>> | null>(null);
-  const [statsUserKey, setStatsUserKey] = useState("guest");
+  const { user, userKey: statsUserKey, displayName } = useAuth();
   const [claimingMissionId, setClaimingMissionId] = useState<string | null>(null);
-  
+
   const [loadingMissions, setLoadingMissions] = useState(true);
   const [loadingMissionStats, setLoadingMissionStats] = useState(true);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
-  
+
   const [showDailyModal, setShowDailyModal] = useState(false);
   const [showWeeklyModal, setShowWeeklyModal] = useState(false);
   const [lastLeaderboardRefresh, setLastLeaderboardRefresh] = useState<number>(0);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!supabase) return;
-
-    let mounted = true;
-
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
-      if (!mounted) return;
-
-      setStatsUserKey(user?.id || user?.email || "guest");
-    })();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user;
-      setStatsUserKey(user?.id || user?.email || "guest");
-    });
-
-    return () => {
-      mounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
   const loadMissions = useCallback(async () => {
     setLoadingMissions(true);
     try {
-      const [dailyState, weeklyState] = await Promise.all([getDailyMissionState(), getWeeklyMissionState()]);
+      if (user) {
+        // Pull server-truth claim state first so a mission claimed on
+        // another device already shows "Claimed" here.
+        await Promise.all([
+          syncClaimedMissionsFromServer("daily", statsUserKey),
+          syncClaimedMissionsFromServer("weekly", statsUserKey),
+        ]);
+      }
+
+      const [dailyState, weeklyState] = await Promise.all([
+        getDailyMissionState(statsUserKey),
+        getWeeklyMissionState(statsUserKey),
+      ]);
       setDailyMissions(dailyState.missions);
       setWeeklyMissions(weeklyState.missions);
       setDailyClaimedIds(dailyState.claimedMissionIds ?? []);
@@ -83,19 +74,20 @@ export function MissionsScreen() {
     } finally {
       setLoadingMissions(false);
     }
-  }, []);
+  }, [user, statsUserKey]);
 
   const loadMissionStats = useCallback(async () => {
     setLoadingMissionStats(true);
     try {
-      const stats = await getCaptureStats(statsUserKey);
+      const dbXp = user ? await fetchUserEcoXpFromDb(user.id) : undefined;
+      const stats = await getCaptureStats(statsUserKey, dbXp);
       setMissionStats(stats);
     } catch (error) {
       console.error("Error loading mission stats:", error);
     } finally {
       setLoadingMissionStats(false);
     }
-  }, [statsUserKey]);
+  }, [statsUserKey, user]);
 
   const shouldRefreshLeaderboard = useCallback((): boolean => {
     const now = Date.now();
@@ -243,8 +235,18 @@ export function MissionsScreen() {
 
                   setClaimingMissionId(mission.id);
                   try {
-                    await claimMissionReward(category, mission.id);
-                    await awardMissionXp(mission.rewardXP, statsUserKey);
+                    if (user) {
+                      // Server-authoritative: atomic claim+award, deduped
+                      // across devices (supabase/migrations/0005_mission_claims.sql).
+                      const result = await claimMissionRemote(category, mission, displayName, statsUserKey);
+                      if (result.status === "error") {
+                        console.error("Error claiming mission reward:", result.message);
+                      }
+                    } else {
+                      // Guest: no server identity to claim against — local-only bookkeeping.
+                      await claimMissionReward(category, mission.id, statsUserKey);
+                      await awardMissionXp(mission.rewardXP, statsUserKey);
+                    }
                     // Force-refresh leaderboard immediately so updated score is reflected
                     await Promise.all([loadMissions(), loadMissionStats(), forceRefreshLeaderboard()]);
                   } catch (error) {
@@ -264,7 +266,7 @@ export function MissionsScreen() {
         </View>
       );
     },
-    [claimingMissionId, forceRefreshLeaderboard, isClaimed, loadMissionStats, loadMissions, missionProgressContext, statsUserKey]
+    [claimingMissionId, displayName, forceRefreshLeaderboard, isClaimed, loadMissionStats, loadMissions, missionProgressContext, statsUserKey, user]
   );
 
   return (

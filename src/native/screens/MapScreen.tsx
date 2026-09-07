@@ -10,12 +10,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, {
   LatLng,
-  MapPressEvent,
+  LongPressEvent,
   Marker,
   Polyline,
   Region,
 } from "react-native-maps";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
 import {
   BinMarker,
@@ -23,12 +23,23 @@ import {
   addBinToDatabase,
   removeBinFromDatabase,
   subscribeToBinsRealtimeUpdates,
+  RealtimeConnectionStatus,
 } from "../../lib/bins";
+import { distanceInMeters, formatDistance } from "../../lib/geo";
+import { useAuth } from "../../lib/AuthContext";
 
 import { clearActiveRoute, getActiveRoute } from "../../lib/route";
 
+const initialRegion: Region = {
+  latitude: 41.3275,
+  longitude: 19.8187,
+  latitudeDelta: 0.01,
+  longitudeDelta: 0.01,
+};
+
 export function MapScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [location, setLocation] =
     useState<Location.LocationObjectCoords | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,7 +47,6 @@ export function MapScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [mapInitialRegion, setMapInitialRegion] = useState<Region | null>(null);
   const [bins, setBins] = useState<BinMarker[]>([]);
-  const [binsLoaded, setBinsLoaded] = useState(false);
   const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
   const [routeDistanceMeters, setRouteDistanceMeters] = useState<number | null>(
     null,
@@ -45,6 +55,8 @@ export function MapScreen() {
     null,
   );
   const [isRouting, setIsRouting] = useState(false);
+  const [isAddingBin, setIsAddingBin] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<RealtimeConnectionStatus>("connected");
   const mapRef = useRef<MapView | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -53,29 +65,8 @@ export function MapScreen() {
     next: Location.LocationObjectCoords,
   ) => {
     if (!current) return true;
-
-    const earthRadius = 6371000;
-    const toRadians = (value: number) => (value * Math.PI) / 180;
-    const dLat = toRadians(next.latitude - current.latitude);
-    const dLon = toRadians(next.longitude - current.longitude);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(toRadians(current.latitude)) *
-        Math.cos(toRadians(next.latitude)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const distance =
-      earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
     // Ignore tiny GPS jitter while standing still.
-    return distance >= 2;
-  };
-
-  const initialRegion: Region = {
-    latitude: 41.3275,
-    longitude: 19.8187,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
+    return distanceInMeters(current.latitude, current.longitude, next.latitude, next.longitude) >= 2;
   };
 
   useEffect(() => {
@@ -116,7 +107,7 @@ export function MapScreen() {
           },
         );
       } catch (err) {
-        console.log("Location error:", err);
+        console.error("Location error:", err);
         setErrorMessage(
           "Could not read your location. Check device settings and GPS.",
         );
@@ -132,76 +123,72 @@ export function MapScreen() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
-      // Initial load of bins from Supabase (or local storage fallback)
-      const storedBins = await loadBins();
+      try {
+        // Initial load of bins from Supabase (or local storage fallback)
+        const storedBins = await loadBins();
+        if (cancelled) return;
 
-      // De-duplicate bins from storage by rounded coordinates
-      const seen = new Set<string>();
-      const uniqueBins = storedBins.filter((bin) => {
-        const key = `${bin.latitude.toFixed(6)}:${bin.longitude.toFixed(6)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
-      setBins(uniqueBins);
-      setBinsLoaded(true);
-
-      // Set up real-time subscription to listen for changes from other users/devices
-      const unsubscribe = subscribeToBinsRealtimeUpdates((updatedBins) => {
-        // De-duplicate updated bins
-        const seenUpdated = new Set<string>();
-        const uniqueUpdated = updatedBins.filter((bin) => {
+        // De-duplicate bins from storage by rounded coordinates
+        const seen = new Set<string>();
+        const uniqueBins = storedBins.filter((bin) => {
           const key = `${bin.latitude.toFixed(6)}:${bin.longitude.toFixed(6)}`;
-          if (seenUpdated.has(key)) return false;
-          seenUpdated.add(key);
+          if (seen.has(key)) return false;
+          seen.add(key);
           return true;
         });
 
-        setBins(uniqueUpdated);
-      });
+        setBins(uniqueBins);
 
-      unsubscribeRef.current = unsubscribe;
+        // Set up real-time subscription to listen for changes from other users/devices
+        const unsubscribe = subscribeToBinsRealtimeUpdates(
+          (updatedBins) => {
+            // De-duplicate updated bins
+            const seenUpdated = new Set<string>();
+            const uniqueUpdated = updatedBins.filter((bin) => {
+              const key = `${bin.latitude.toFixed(6)}:${bin.longitude.toFixed(6)}`;
+              if (seenUpdated.has(key)) return false;
+              seenUpdated.add(key);
+              return true;
+            });
+
+            setBins(uniqueUpdated);
+          },
+          (status) => {
+            if (!cancelled) setLiveStatus(status);
+          },
+        );
+
+        if (cancelled) {
+          // Component unmounted while the subscription was being set up —
+          // tear it straight down instead of leaking it via the ref, since
+          // the cleanup below already ran before `unsubscribeRef` was set.
+          unsubscribe?.();
+          return;
+        }
+
+        unsubscribeRef.current = unsubscribe;
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to load bins:", err);
+        }
+      }
     })();
 
     // Cleanup: unsubscribe when component unmounts
     return () => {
+      cancelled = true;
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
   }, []);
 
   const lat = location?.latitude ?? initialRegion.latitude;
   const lon = location?.longitude ?? initialRegion.longitude;
-
-  const toRadians = (value: number) => (value * Math.PI) / 180;
-
-  const distanceInMeters = (
-    fromLat: number,
-    fromLon: number,
-    toLat: number,
-    toLon: number,
-  ) => {
-    const earthRadius = 6371000;
-    const dLat = toRadians(toLat - fromLat);
-    const dLon = toRadians(toLon - fromLon);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(toRadians(fromLat)) *
-        Math.cos(toRadians(toLat)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-
-    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  };
-
-  const formatDistance = (meters: number | null) => {
-    if (meters === null) return "";
-    if (meters < 1000) return `${Math.round(meters)} m`;
-    return `${(meters / 1000).toFixed(2)} km`;
-  };
 
   const routeStart = routeCoords.length > 0 ? routeCoords[0] : null;
   const routeEnd =
@@ -406,7 +393,16 @@ export function MapScreen() {
     }
   };
 
+  const makeBinId = () => `bin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
   const addBinAtCurrentLocation = async () => {
+    if (isAddingBin) return;
+
+    if (!user) {
+      setErrorMessage("Sign in to add bins to the shared map.");
+      return;
+    }
+
     if (!location) {
       setErrorMessage("Current location is not available yet.");
       return;
@@ -427,25 +423,34 @@ export function MapScreen() {
     }
 
     const newBin: BinMarker = {
-      id: `bin-${Date.now()}`,
+      id: makeBinId(),
       latitude: location.latitude,
       longitude: location.longitude,
       source: "current",
     };
 
-    // Try to save to Supabase; if it fails, still add locally
-    const saved = await addBinToDatabase(newBin);
-    if (saved) {
-      setBins((prev) => [...prev, newBin]);
-      setErrorMessage(null);
-    } else {
-      // Supabase failed; add to local state anyway
-      setBins((prev) => [...prev, newBin]);
-      setErrorMessage("Added locally. Server sync may be delayed.");
+    setIsAddingBin(true);
+    try {
+      const saved = await addBinToDatabase(newBin);
+      if (saved) {
+        setBins((prev) => [...prev, newBin]);
+        setErrorMessage(null);
+      } else {
+        setErrorMessage("Could not add this bin. Check your connection and try again.");
+      }
+    } finally {
+      setIsAddingBin(false);
     }
   };
 
-  const addBinManually = async (event: any) => {
+  const addBinManually = async (event: LongPressEvent) => {
+    if (isAddingBin) return;
+
+    if (!user) {
+      setErrorMessage("Sign in to add bins to the shared map.");
+      return;
+    }
+
     const { latitude, longitude } = event.nativeEvent.coordinate;
 
     const existsNearby = bins.some(
@@ -458,25 +463,32 @@ export function MapScreen() {
     }
 
     const newBin: BinMarker = {
-      id: `bin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: makeBinId(),
       latitude,
       longitude,
       source: "manual",
     };
 
-    // Try to save to Supabase; if it fails, still add locally
-    const saved = await addBinToDatabase(newBin);
-    if (saved) {
-      setBins((prev) => [...prev, newBin]);
-      setErrorMessage(null);
-    } else {
-      // Supabase failed; add to local state anyway
-      setBins((prev) => [...prev, newBin]);
-      setErrorMessage("Added locally. Server sync may be delayed.");
+    setIsAddingBin(true);
+    try {
+      const saved = await addBinToDatabase(newBin);
+      if (saved) {
+        setBins((prev) => [...prev, newBin]);
+        setErrorMessage(null);
+      } else {
+        setErrorMessage("Could not add this bin. Check your connection and try again.");
+      }
+    } finally {
+      setIsAddingBin(false);
     }
   };
 
   const removeBin = (id: string) => {
+    if (!user) {
+      setErrorMessage("Sign in to remove bins from the shared map.");
+      return;
+    }
+
     Alert.alert("Remove bin", "Do you want to remove this bin marker?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -484,6 +496,11 @@ export function MapScreen() {
         style: "destructive",
         onPress: async () => {
           const removed = await removeBinFromDatabase(id);
+          if (!removed) {
+            setErrorMessage("Could not remove this bin. You may only remove bins you added yourself.");
+            return;
+          }
+
           const nextBins = bins.filter((bin) => bin.id !== id);
           const removedRoutedBin =
             routeDestination?.id === id ||
@@ -491,6 +508,7 @@ export function MapScreen() {
               !nextBins.some((bin) => bin.id === routeDestination.id));
 
           setBins(nextBins);
+          setErrorMessage(null);
 
           if (removedRoutedBin) {
             if (nextBins.length > 0 && location) {
@@ -498,12 +516,6 @@ export function MapScreen() {
             } else {
               clearRoute();
             }
-          }
-
-          if (!removed) {
-            setErrorMessage("Removed locally. Server sync may be delayed.");
-          } else if (removedRoutedBin && nextBins.length > 0) {
-            setErrorMessage(null);
           }
         },
       },
@@ -527,6 +539,9 @@ export function MapScreen() {
             ? "Location access is off. Enable it to show your current position."
             : errorMessage || "Showing your live position on the map."}
         </Text>
+        {liveStatus === "reconnecting" ? (
+          <Text style={styles.liveStatusText}>Reconnecting live map updates…</Text>
+        ) : null}
       </View>
 
       <MapView
@@ -615,15 +630,17 @@ export function MapScreen() {
           </View>
         ) : null}
         <TouchableOpacity
-          style={[styles.button, styles.spacing]}
+          style={[styles.button, styles.spacing, isAddingBin && styles.buttonDisabled]}
           onPress={addBinAtCurrentLocation}
           activeOpacity={0.85}
+          disabled={isAddingBin}
         >
-          <Text style={styles.buttonText}>Add Bin At My Location</Text>
+          <Text style={styles.buttonText}>{isAddingBin ? "Adding..." : "Add Bin At My Location"}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.button, styles.spacing]}
+          style={[styles.button, styles.spacing, isRouting && styles.buttonDisabled]}
           onPress={() => {
+            if (isRouting) return;
             const nearestBin = findNearestBin();
             if (nearestBin) {
               void buildRoute(nearestBin);
@@ -636,6 +653,7 @@ export function MapScreen() {
             }
           }}
           activeOpacity={0.85}
+          disabled={isRouting}
         >
           <Text style={styles.buttonText}>Refresh Route</Text>
         </TouchableOpacity>
@@ -656,6 +674,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title: { fontSize: 28, fontWeight: "700", color: "#1e293b" },
   subtitle: { marginTop: 6, fontSize: 13, color: "#475569" },
+  liveStatusText: { marginTop: 4, fontSize: 12, color: "#b45309", fontWeight: "600" },
   map: { flex: 1 },
   footer: { padding: 16, backgroundColor: "#ecfdf5" },
   helperText: { marginBottom: 10, color: "#475569", fontSize: 12 },
@@ -667,6 +686,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  buttonDisabled: { opacity: 0.6 },
   routeCard: {
     backgroundColor: "#ffffff",
     borderWidth: 1,
