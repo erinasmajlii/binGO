@@ -153,9 +153,9 @@ export async function removeBinFromDatabase(id: string): Promise<boolean> {
 
   try {
     // .select() after delete so we get back the rows that were actually
-    // deleted — an RLS-denied delete (not the owner) returns no error at
-    // all, just zero affected rows, so checking `error` alone would report
-    // false success.
+    // deleted — an RLS-denied delete (e.g. not authenticated at all, or the
+    // row was already removed by someone else) returns no error, just zero
+    // affected rows, so checking `error` alone would report false success.
     const { data, error } = await supabase
       .from("bins")
       .delete()

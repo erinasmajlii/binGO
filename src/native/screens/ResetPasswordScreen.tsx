@@ -35,7 +35,28 @@ export function ResetPasswordScreen() {
     let mounted = true;
 
     const redeem = async (url: string | null) => {
-      if (!url || handledRef.current) return;
+      if (handledRef.current) return;
+
+      // Reached via ProfileScreen's "paste the link/code" fallback — that
+      // screen already redeemed the code and established a real recovery
+      // session before navigating here, so there's no deep-link URL to
+      // parse. Skip straight to the new-password form.
+      if (!url) {
+        const { data } = supabase
+          ? await supabase.auth.getSession()
+          : { data: { session: null } };
+
+        if (!mounted) return;
+
+        if (data.session) {
+          handledRef.current = true;
+          setStage("ready");
+        } else {
+          setStage("invalid");
+          setError("No active reset session found. Start over from the login screen.");
+        }
+        return;
+      }
 
       const code = Linking.parse(url).queryParams?.code;
       if (!code || typeof code !== "string") {

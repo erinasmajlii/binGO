@@ -47,6 +47,7 @@ export function MapScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [mapInitialRegion, setMapInitialRegion] = useState<Region | null>(null);
   const [bins, setBins] = useState<BinMarker[]>([]);
+  const [binsLoaded, setBinsLoaded] = useState(false);
   const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
   const [routeDistanceMeters, setRouteDistanceMeters] = useState<number | null>(
     null,
@@ -141,6 +142,7 @@ export function MapScreen() {
         });
 
         setBins(uniqueBins);
+        setBinsLoaded(true);
 
         // Set up real-time subscription to listen for changes from other users/devices
         const unsubscribe = subscribeToBinsRealtimeUpdates(
@@ -173,6 +175,7 @@ export function MapScreen() {
       } catch (err) {
         if (!cancelled) {
           console.error("Failed to load bins:", err);
+          setBinsLoaded(true);
         }
       }
     })();
@@ -341,21 +344,37 @@ export function MapScreen() {
     [findNearestBin, buildRoute, clearRoute],
   );
 
-  // If the routed bin disappears (removed locally or via realtime), reroute or clear.
+  // Keeps the active route consistent with the real bins/location state.
+  // Gated on `binsLoaded`: right after a scan, MapScreen mounts with `bins`
+  // still empty while the real list loads asynchronously from Supabase —
+  // without this guard, that momentary empty list looked identical to "the
+  // destination bin was deleted" and cleared the just-computed route
+  // before it ever had a chance to render.
   useEffect(() => {
-    if (!routeDestination) return;
+    if (!binsLoaded || !routeDestination) return;
 
     const destinationStillExists = bins.some(
       (bin) => bin.id === routeDestination.id,
     );
-    if (destinationStillExists) return;
 
-    if (bins.length > 0 && location) {
-      routeToNearestBin(bins);
-    } else {
-      clearRoute();
+    if (!destinationStillExists) {
+      // Routed bin disappeared (removed locally or via realtime) — reroute
+      // to whatever's next-nearest, or clear if none remain.
+      if (bins.length > 0 && location) {
+        routeToNearestBin(bins);
+      } else {
+        clearRoute();
+      }
+      return;
     }
-  }, [bins, routeDestination, location, routeToNearestBin, clearRoute]);
+
+    // Destination is still valid but no line has been drawn for it yet —
+    // happens when location wasn't ready yet the moment this screen first
+    // picked up the route request from a scan. Draw it now that it is.
+    if (routeCoords.length === 0 && location) {
+      void buildRoute(routeDestination);
+    }
+  }, [binsLoaded, bins, routeDestination, location, routeCoords.length, routeToNearestBin, clearRoute, buildRoute]);
 
   useFocusEffect(
     useCallback(() => {
@@ -497,7 +516,7 @@ export function MapScreen() {
         onPress: async () => {
           const removed = await removeBinFromDatabase(id);
           if (!removed) {
-            setErrorMessage("Could not remove this bin. You may only remove bins you added yourself.");
+            setErrorMessage("Could not remove this bin. Check your connection and try again.");
             return;
           }
 

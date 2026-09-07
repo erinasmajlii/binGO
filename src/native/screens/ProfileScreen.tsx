@@ -37,6 +37,15 @@ export function ProfileScreen() {
   const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
   const [forgotPasswordStatus, setForgotPasswordStatus] = useState<string | null>(null);
   const [sendingResetEmail, setSendingResetEmail] = useState(false);
+  const [pastedResetCode, setPastedResetCode] = useState("");
+  const [pasteCodeError, setPasteCodeError] = useState<string | null>(null);
+  const [redeemingPastedCode, setRedeemingPastedCode] = useState(false);
+  const [codeVerified, setCodeVerified] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
+  const [settingNewPassword, setSettingNewPassword] = useState(false);
+  const [newPasswordSuccess, setNewPasswordSuccess] = useState(false);
   const [ecoXp, setEcoXp] = useState(0);
   const [stats, setStats] = useState<Awaited<
     ReturnType<typeof getCaptureStats>
@@ -179,6 +188,98 @@ export function ProfileScreen() {
     }
   };
 
+  /**
+   * Fallback for when tapping the reset-password email link opens a browser
+   * instead of the app (e.g. testing in Expo Go, where the real deep-link
+   * target is a dynamic `exp://<lan-ip>` address that can't be pre-allowlisted
+   * in Supabase, or the redirect-URL allowlist step hasn't been done yet — in
+   * both cases Supabase falls back to its default Site URL). The recovery
+   * `code` is still valid wherever it ends up; this lets the user hand it
+   * back to the app manually instead of needing the deep link to work.
+   */
+  const handleRedeemPastedCode = async () => {
+    setPasteCodeError(null);
+
+    const raw = pastedResetCode.trim();
+    if (!raw) {
+      setPasteCodeError("Paste the reset link or code from the email first.");
+      return;
+    }
+    if (!supabase) {
+      setPasteCodeError("Supabase is not configured on this device.");
+      return;
+    }
+
+    const codeMatch = raw.match(/[?&#]code=([^&\s]+)/);
+    const code = codeMatch ? decodeURIComponent(codeMatch[1]) : raw;
+
+    setRedeemingPastedCode(true);
+    try {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) {
+        setPasteCodeError(
+          error.message.toLowerCase().includes("expired") ||
+            error.message.toLowerCase().includes("invalid")
+            ? "This code is invalid or has expired. Send a new reset email and try again quickly."
+            : error.message,
+        );
+        return;
+      }
+
+      setPastedResetCode("");
+      // Stay on this screen and show the new-password form directly —
+      // navigating to a different route from here was unreliable (the
+      // freshly-established recovery session flips isAuthenticated before
+      // the navigation lands, so the user ended up back in the
+      // already-logged-in app instead of the password form).
+      setCodeVerified(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setPasteCodeError(message || "Could not verify that code.");
+    } finally {
+      setRedeemingPastedCode(false);
+    }
+  };
+
+  const handleSetNewPasswordAfterReset = async () => {
+    setNewPasswordError(null);
+
+    if (newPassword.length < 6) {
+      setNewPasswordError("Password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setNewPasswordError("Passwords do not match.");
+      return;
+    }
+    if (!supabase) {
+      setNewPasswordError("Supabase is not configured on this device.");
+      return;
+    }
+
+    setSettingNewPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        setNewPasswordError(error.message);
+        return;
+      }
+
+      setNewPasswordSuccess(true);
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setTimeout(() => {
+        setCodeVerified(false);
+        router.replace("/(tabs)/home");
+      }, 1200);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setNewPasswordError(message || "Could not update the password.");
+    } finally {
+      setSettingNewPassword(false);
+    }
+  };
+
   const handleLogout = async () => {
     await signOut();
     setPassword("");
@@ -248,6 +349,69 @@ export function ProfileScreen() {
     return `${Math.round(progress)}%`;
   }, [xpIntoLevel]);
 
+  if (codeVerified) {
+    // Redeeming the recovery code already establishes a real session, which
+    // flips `isAuthenticated` to true — this check must come before that
+    // gate below, or this form never has a chance to render (the app would
+    // just fall through to the normal authenticated dashboard immediately,
+    // "logging in" without ever asking for a new password).
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <ScrollView contentContainerStyle={styles.loginContent}>
+          <View style={styles.loginCard}>
+            <Text style={styles.loginTitle}>Set new password</Text>
+            <Text style={styles.loginNote}>
+              Your reset code was verified. Choose a new password below.
+            </Text>
+
+            {newPasswordSuccess ? (
+              <Text style={styles.resendStatus}>Password updated. Taking you to the app…</Text>
+            ) : (
+              <>
+                <Text style={styles.label}>NEW PASSWORD</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter new password"
+                  placeholderTextColor="#94a3b8"
+                  secureTextEntry
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                />
+
+                <Text style={styles.label}>CONFIRM PASSWORD</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Re-enter new password"
+                  placeholderTextColor="#94a3b8"
+                  secureTextEntry
+                  value={confirmNewPassword}
+                  onChangeText={setConfirmNewPassword}
+                />
+
+                {newPasswordError ? (
+                  <Text style={styles.authError}>{newPasswordError}</Text>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.loginBtn, settingNewPassword && styles.loginBtnDisabled]}
+                  onPress={handleSetNewPasswordAfterReset}
+                  activeOpacity={0.85}
+                  disabled={settingNewPassword}
+                >
+                  {settingNewPassword ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Set new password</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -288,11 +452,48 @@ export function ProfileScreen() {
                   )}
                 </TouchableOpacity>
 
+                <View style={styles.divider} />
+
+                <Text style={styles.loginNote}>
+                  Already got the email? If tapping the link opened a browser
+                  instead of the app, paste the link (or just the code from
+                  its address bar) here:
+                </Text>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="Paste reset link or code"
+                  placeholderTextColor="#94a3b8"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={pastedResetCode}
+                  onChangeText={setPastedResetCode}
+                />
+
+                {pasteCodeError ? (
+                  <Text style={styles.authError}>{pasteCodeError}</Text>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.loginBtn, redeemingPastedCode && styles.loginBtnDisabled]}
+                  onPress={handleRedeemPastedCode}
+                  activeOpacity={0.85}
+                  disabled={redeemingPastedCode}
+                >
+                  {redeemingPastedCode ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.loginBtnText}>Continue</Text>
+                  )}
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={styles.skipBtn}
                   onPress={() => {
                     setForgotPasswordMode(false);
                     setForgotPasswordStatus(null);
+                    setPastedResetCode("");
+                    setPasteCodeError(null);
                   }}
                 >
                   <Text style={styles.skipBtnText}>Back to login</Text>
@@ -584,6 +785,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   loginNote: { fontSize: 12, color: "#94a3b8", marginBottom: 20 },
+  divider: { height: 1, backgroundColor: "#e2e8f0", marginVertical: 18 },
   label: { fontSize: 11, fontWeight: "600", color: "#475569", marginBottom: 6 },
   input: {
     backgroundColor: "#ecfdf5",
