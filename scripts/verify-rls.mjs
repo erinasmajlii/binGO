@@ -151,6 +151,34 @@ async function testMissionClaimsAnonReadDenied() {
   report("anon sees zero mission_claims rows", res.ok && Array.isArray(rows) && rows.length === 0, `HTTP ${res.status}, ${Array.isArray(rows) ? rows.length : "?"} rows`);
 }
 
+async function testBinReportsAnonInsertDenied() {
+  console.log("\n[8] anon cannot insert bin_reports");
+  const res = await fetch(`${URL}/rest/v1/bin_reports`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json", Prefer: "return=representation" },
+    body: JSON.stringify({ bin_id: "bin-demo-1", status: "full" }),
+  });
+  const inserted = res.ok;
+  if (inserted) {
+    // Clean up if the insert unexpectedly succeeded (would only happen if RLS regressed).
+    const body = await res.json().catch(() => null);
+    const id = Array.isArray(body) ? body[0]?.id : undefined;
+    if (id) {
+      await fetch(`${URL}/rest/v1/bin_reports?id=eq.${id}`, {
+        method: "DELETE",
+        headers: { apikey: env.SUPABASE_SECRET_KEY ?? ANON_KEY, Authorization: `Bearer ${env.SUPABASE_SECRET_KEY ?? ANON_KEY}` },
+      }).catch(() => {});
+    }
+  }
+  report("anon INSERT on bin_reports is rejected", !inserted, inserted ? `HTTP ${res.status} — insert succeeded!` : undefined);
+}
+
+async function testBinReportsPubliclyReadable() {
+  console.log("\n[9] bin_reports SELECT stays public (matches bins' transparency model)");
+  const res = await fetch(`${URL}/rest/v1/bin_reports?select=id&limit=1`, { headers });
+  report("anon can read bin_reports (200, not blocked)", res.ok, `HTTP ${res.status}`);
+}
+
 console.log(`Running RLS regression checks against ${URL}\n(anon-key coverage only — see script header for scope)`);
 
 await testDisplayExpNoEmail();
@@ -160,6 +188,8 @@ await testLeaderboardAnonUpdateDenied();
 await testRpcRequiresAuth();
 await testClaimMissionRequiresAuth();
 await testMissionClaimsAnonReadDenied();
+await testBinReportsAnonInsertDenied();
+await testBinReportsPubliclyReadable();
 
 console.log(`\n${failures === 0 ? "All checks passed." : `${failures} check(s) FAILED.`}`);
 process.exit(failures === 0 ? 0 : 1);

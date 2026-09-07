@@ -3,8 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BinMarker, loadBins } from "../../lib/bins";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 export function MapScreen() {
+  const { t } = useI18n();
   const [bins, setBins] = useState<BinMarker[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,29 +40,29 @@ export function MapScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
           <Ionicons name="map-outline" size={48} color="#059669" style={{ alignSelf: "center", marginBottom: 12 }} />
-          <Text style={styles.title}>Waste Bins & Recyclers Map</Text>
+          <Text style={styles.title}>{t("mapWeb.title")}</Text>
           <Text style={styles.subtitle}>
-            Showing {bins.length} waste drop-off locations nearby.
+            {t("mapWeb.subtitle", { count: bins.length })}
           </Text>
 
           <TouchableOpacity style={styles.button} onPress={openGoogleMaps} activeOpacity={0.85}>
             <Ionicons name="navigate" size={18} color="#fff" />
-            <Text style={styles.buttonText}>Open Google Maps</Text>
+            <Text style={styles.buttonText}>{t("mapWeb.openGoogleMaps")}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.listSection}>
-          <Text style={styles.sectionTitle}>Nearby Locations ({bins.length})</Text>
+          <Text style={styles.sectionTitle}>{t("mapWeb.nearbyLocations", { count: bins.length })}</Text>
           {loading ? (
             <ActivityIndicator size="small" color="#10b981" style={{ marginVertical: 12 }} />
           ) : bins.length === 0 ? (
-            <Text style={styles.binCoords}>No bins reported yet.</Text>
+            <Text style={styles.binCoords}>{t("mapWeb.noBinsYet")}</Text>
           ) : null}
           {bins.map((bin, index) => (
             <View key={bin.id || index} style={styles.binItem}>
               <Ionicons name="trash-outline" size={20} color="#10b981" />
               <View style={styles.binDetails}>
-                <Text style={styles.binName}>Bin #{index + 1}</Text>
+                <Text style={styles.binName}>{t("mapWeb.binNumber", { number: index + 1 })}</Text>
                 <Text style={styles.binCoords}>
                   {bin.latitude.toFixed(4)}, {bin.longitude.toFixed(4)}
                 </Text>

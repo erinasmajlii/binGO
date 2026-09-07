@@ -8,11 +8,13 @@ import * as Location from "expo-location";
 import { BinMarker, loadBins } from "../../lib/bins";
 import { distanceInMeters } from "../../lib/geo";
 import { setActiveRoute } from "../../lib/route";
-import { CATEGORY_LABELS, saveCaptureRecord } from "../../lib/trashStats";
+import { saveCaptureRecord, TrashCategory } from "../../lib/trashStats";
 import { classifyTrashPhotoWithModel } from "../../lib/trashClassifierApi";
 import { useAuth } from "../../lib/AuthContext";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 export function ReportScreen() {
+  const { t } = useI18n();
   const [, requestPermission] = useCameraPermissions();
   const [showCamera, setShowCamera] = useState(false);
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
@@ -27,6 +29,8 @@ export function ReportScreen() {
       isMountedRef.current = false;
     };
   }, []);
+
+  const categoryLabel = (category: TrashCategory) => t(`categories.${category}` as const);
 
   const getNearestBin = (bins: BinMarker[], latitude: number, longitude: number) => {
     if (bins.length === 0) return null;
@@ -48,7 +52,7 @@ export function ReportScreen() {
   const handleOpenCamera = async () => {
     const { granted } = await requestPermission();
     if (!granted) {
-      Alert.alert("Permission denied", "Camera permission is required to take photos.");
+      Alert.alert(t("report.permissionDenied"), t("report.cameraPermissionRequired"));
       return;
     }
     setCapturedPhotoUri(null);
@@ -66,7 +70,7 @@ export function ReportScreen() {
       const photo = await cameraRef.current.takePictureAsync();
       if (!isMountedRef.current) return;
       setCapturedPhotoUri(photo.uri);
-      setCaptureLabel("Analyzing...");
+      setCaptureLabel(t("report.analyzing"));
 
       const classified = await classifyTrashPhotoWithModel(photo.uri);
       if (!isMountedRef.current) return;
@@ -78,9 +82,9 @@ export function ReportScreen() {
       // real trained classifier. Both heuristic paths are best-effort guesses.
       const detectionText =
         classified.source === "model"
-          ? CATEGORY_LABELS[classified.category]
-          : `${CATEGORY_LABELS[classified.category]} (estimated)`;
-      let statusText = `Detected ${detectionText}. Opening map...`;
+          ? categoryLabel(classified.category)
+          : `${categoryLabel(classified.category)} ${t("report.estimatedSuffix")}`;
+      let statusText = t("report.detected", { category: detectionText });
 
       let bins = await loadBins();
       if (!isMountedRef.current) return;
@@ -94,11 +98,11 @@ export function ReportScreen() {
 
       try {
         if (bins.length === 0) {
-          statusText = `Detected ${detectionText}. No bins saved yet, but opening map.`;
+          statusText = t("report.detectedNoBins", { category: detectionText });
         } else {
           const { status } = await Location.requestForegroundPermissionsAsync();
           if (status !== "granted") {
-            statusText = `Detected ${detectionText}. Enable location for nearest-bin routing.`;
+            statusText = t("report.detectedEnableLocation", { category: detectionText });
           } else {
             const current = await Location.getCurrentPositionAsync({
               accuracy: Location.Accuracy.Balanced,
@@ -110,12 +114,12 @@ export function ReportScreen() {
                 destination: nearest,
                 createdAt: Date.now(),
               });
-              statusText = `Detected ${detectionText}. Route to nearest bin is ready.`;
+              statusText = t("report.detectedRouteReady", { category: detectionText });
             }
           }
         }
       } catch {
-        statusText = `Detected ${detectionText}. Saved report, opening map.`;
+        statusText = t("report.detectedSavedReport", { category: detectionText });
       }
 
       if (!isMountedRef.current) return;
@@ -133,7 +137,7 @@ export function ReportScreen() {
       if (!isMountedRef.current) return;
       setCapturedPhotoUri(null);
       setCaptureLabel(null);
-      setCaptureError("Couldn't capture that photo. Please try again.");
+      setCaptureError(t("report.couldNotCapture"));
     }
   };
 
@@ -143,9 +147,9 @@ export function ReportScreen() {
         {capturedPhotoUri ? (
           <Image source={{ uri: capturedPhotoUri }} style={styles.camera} />
         ) : (
-          <CameraView 
-            style={styles.camera} 
-            ref={cameraRef} 
+          <CameraView
+            style={styles.camera}
+            ref={cameraRef}
             facing="back"
           />
         )}
@@ -184,26 +188,26 @@ export function ReportScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Report Trash</Text>
+        <Text style={styles.title}>{t("report.title")}</Text>
         <Text style={styles.subtitle}>
-          Snap a photo of litter to earn EcoXP.
+          {t("report.subtitle")}
         </Text>
 
         <TouchableOpacity style={styles.button} activeOpacity={0.85} onPress={handleOpenCamera}>
           <Ionicons name="camera" size={20} color="#fff" />
-          <Text style={styles.buttonText}>Open Camera</Text>
+          <Text style={styles.buttonText}>{t("report.openCamera")}</Text>
         </TouchableOpacity>
 
         <View style={styles.tipsCard}>
           <View style={styles.tipsHeader}>
             <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-            <Text style={styles.tipsTitle}>Tips for better reports</Text>
+            <Text style={styles.tipsTitle}>{t("report.tipsTitle")}</Text>
           </View>
 
           {[
-            "Make sure the trash is clearly visible",
-            "Include a bit of the surrounding context",
-            "Avoid motion blur",
+            t("report.tip1"),
+            t("report.tip2"),
+            t("report.tip3"),
           ].map((tip, i) => (
             <View key={i} style={styles.tipRow}>
               <View style={styles.dot} />

@@ -1,14 +1,54 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 
+export type BinStatus = "full" | "damaged";
+
 export type BinMarker = {
   id: string;
   latitude: number;
   longitude: number;
   source: "current" | "manual";
+  /** null = no open report; otherwise whatever the most recent report said. */
+  currentStatus: BinStatus | null;
+  statusUpdatedAt: string | null;
+};
+
+export type BinReport = {
+  id: string;
+  binId: string;
+  status: BinStatus;
+  reportedBy: string | null;
+  createdAt: string;
+  resolved: boolean;
 };
 
 const BINS_STORAGE_KEY = "bingo_bins_v1";
+
+const BIN_SELECT_COLUMNS =
+  "id,latitude,longitude,source,current_status,status_updated_at";
+
+function toBinMarker(row: {
+  id: string;
+  latitude: number;
+  longitude: number;
+  source: string | null;
+  current_status?: string | null;
+  status_updated_at?: string | null;
+}): BinMarker {
+  return {
+    id: String(row.id || ""),
+    latitude: Number(row.latitude || 0),
+    longitude: Number(row.longitude || 0),
+    source: (row.source === "current" ? "current" : "manual") as
+      | "current"
+      | "manual",
+    currentStatus:
+      row.current_status === "full" || row.current_status === "damaged"
+        ? row.current_status
+        : null,
+    statusUpdatedAt: row.status_updated_at ?? null,
+  };
+}
 
 /**
  * Load bins from local AsyncStorage.
@@ -56,9 +96,7 @@ export async function loadBins(): Promise<BinMarker[]> {
   }
 
   try {
-    const { data, error } = await supabase
-      .from("bins")
-      .select("id,latitude,longitude,source");
+    const { data, error } = await supabase.from("bins").select(BIN_SELECT_COLUMNS);
 
     if (error || !Array.isArray(data)) {
       // Fetch failed; fall back to local storage
@@ -66,14 +104,7 @@ export async function loadBins(): Promise<BinMarker[]> {
     }
 
     const bins = data
-      .map((row) => ({
-        id: String(row.id || ""),
-        latitude: Number(row.latitude || 0),
-        longitude: Number(row.longitude || 0),
-        source: (row.source === "current" ? "current" : "manual") as
-          | "current"
-          | "manual",
-      }))
+      .map(toBinMarker)
       .filter(
         (bin) =>
           bin.id &&
@@ -120,21 +151,14 @@ export async function addBinToDatabase(
         longitude: bin.longitude,
         source: bin.source,
       })
-      .select("id,latitude,longitude,source");
+      .select(BIN_SELECT_COLUMNS);
 
     if (error || !data || data.length === 0) {
       console.error("Failed to add bin to Supabase:", error);
       return null;
     }
 
-    return {
-      id: String(data[0].id),
-      latitude: Number(data[0].latitude),
-      longitude: Number(data[0].longitude),
-      source: (data[0].source === "current" ? "current" : "manual") as
-        | "current"
-        | "manual",
-    };
+    return toBinMarker(data[0]);
   } catch (err) {
     console.error("Error adding bin:", err);
     return null;
@@ -174,16 +198,82 @@ export async function removeBinFromDatabase(id: string): Promise<boolean> {
   }
 }
 
+/**
+ * Report a bin's condition (Full/Damaged). Inserts a new row into
+ * bin_reports (kept as full history for a future municipality dashboard —
+ * see supabase/migrations/0007_bin_reports.sql) — a trigger there updates
+ * bins.current_status to match, which the existing bins realtime
+ * subscription already picks up, so no separate realtime wiring is needed.
+ * Requires authentication (RLS); returns false for a guest/anonymous caller.
+ */
+export async function reportBinStatus(
+  binId: string,
+  status: BinStatus,
+): Promise<boolean> {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase.from("bin_reports").insert({
+      bin_id: binId,
+      status,
+    });
+
+    if (error) {
+      console.error("Failed to report bin status:", error);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error("Error reporting bin status:", err);
+    return false;
+  }
+}
+
+/**
+ * Fetch the report history for a single bin (most recent first), for the
+ * bin-detail view.
+ */
+export async function fetchBinReports(binId: string): Promise<BinReport[]> {
+  if (!supabase) return [];
+
+  try {
+    const { data, error } = await supabase
+      .from("bin_reports")
+      .select("id,bin_id,status,reported_by,created_at,resolved")
+      .eq("bin_id", binId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (error || !Array.isArray(data)) return [];
+
+    return data
+      .filter((row) => row.status === "full" || row.status === "damaged")
+      .map((row) => ({
+        id: String(row.id),
+        binId: String(row.bin_id),
+        status: row.status as BinStatus,
+        reportedBy: row.reported_by ?? null,
+        createdAt: String(row.created_at),
+        resolved: Boolean(row.resolved),
+      }));
+  } catch (err) {
+    console.error("Error fetching bin reports:", err);
+    return [];
+  }
+}
+
 export type RealtimeConnectionStatus = "connected" | "reconnecting";
 
 const RECONNECT_DELAY_MS = 4000;
 
 /**
  * Subscribe to real-time changes to the bins table.
- * Calls `onUpdate` whenever bins are added, updated, or deleted, and
- * (optionally) `onStatusChange` when the connection drops or recovers, so
- * the UI can show a "reconnecting" indicator instead of silently going
- * stale. Returns an unsubscribe function.
+ * Calls `onUpdate` whenever bins are added, updated, or deleted — including
+ * status changes, since those land as an UPDATE on the same `bins` row
+ * (see bin_reports' trigger) — and (optionally) `onStatusChange` when the
+ * connection drops or recovers, so the UI can show a "reconnecting"
+ * indicator instead of silently going stale. Returns an unsubscribe function.
  */
 export function subscribeToBinsRealtimeUpdates(
   onUpdate: (bins: BinMarker[]) => void,
@@ -197,6 +287,14 @@ export function subscribeToBinsRealtimeUpdates(
   let unsubscribed = false;
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
   let currentChannel: ReturnType<typeof client.channel> | null = null;
+  // Supabase's free-tier Realtime tenant is torn down after ~60s with no
+  // active subscribers and takes a brief moment to reconnect on the next
+  // subscribe — the first attempt against a cold tenant routinely gets
+  // CHANNEL_ERROR before the retry below succeeds. That's expected, not a
+  // real failure, so only escalate to console.error (which surfaces as a
+  // scary red overlay in dev) once retries themselves keep failing.
+  const CONSECUTIVE_FAILURES_BEFORE_ERROR_LOG = 3;
+  let consecutiveFailures = 0;
 
   const connect = () => {
     if (unsubscribed) return;
@@ -220,12 +318,18 @@ export function subscribeToBinsRealtimeUpdates(
         if (unsubscribed) return;
 
         if (status === "SUBSCRIBED") {
+          consecutiveFailures = 0;
           onStatusChange?.("connected");
           return;
         }
 
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error("Bins realtime subscription failed:", status);
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= CONSECUTIVE_FAILURES_BEFORE_ERROR_LOG) {
+            console.error("Bins realtime subscription failed repeatedly:", status);
+          } else {
+            console.warn("Bins realtime subscription hiccup, retrying:", status);
+          }
           onStatusChange?.("reconnecting");
 
           if (currentChannel) {

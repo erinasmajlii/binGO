@@ -22,6 +22,7 @@ import {
 } from "../../lib/missions";
 import { getSupabaseConfigIssue, checkSupabaseReachable } from "../../lib/supabase";
 import { useAuth } from "../../lib/AuthContext";
+import { useI18n, type TranslationKey } from "../../lib/i18n/I18nContext";
 
 const rankStyle = (rank: number) => {
   if (rank === 1) return { bg: "#fef3c7", border: "#fde68a" };
@@ -31,6 +32,7 @@ const rankStyle = (rank: number) => {
 
 export function MissionsScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const [dailyMissions, setDailyMissions] = useState<Mission[]>([]);
   const [weeklyMissions, setWeeklyMissions] = useState<Mission[]>([]);
   const [dailyClaimedIds, setDailyClaimedIds] = useState<string[]>([]);
@@ -129,11 +131,11 @@ export function MissionsScreen() {
       setLastLeaderboardRefresh(Date.now());
     } catch (error) {
       console.error("Error loading leaderboard:", error);
-      setLeaderboardError(String(error ?? "Unknown error fetching leaderboard"));
+      setLeaderboardError(error instanceof Error ? error.message : t("missions.unknownLeaderboardError"));
     } finally {
       setLoadingLeaderboard(false);
     }
-  }, [shouldRefreshLeaderboard]);
+  }, [shouldRefreshLeaderboard, t]);
 
   /** Unconditional leaderboard fetch — used after mission claims to bypass the 24h cache. */
   const forceRefreshLeaderboard = useCallback(async () => {
@@ -188,6 +190,9 @@ export function MissionsScreen() {
       const isDaily = category === "daily";
       const progressColor = isDaily ? "#10b981" : "#8b5cf6";
       const safePercent = Number.isFinite(progress.percent) ? progress.percent : 0;
+      const missionTitle = t(`missionCatalog.${mission.id}.title` as TranslationKey);
+      const missionDescription = t(`missionCatalog.${mission.id}.description` as TranslationKey);
+      const progressLabel = mission.progressScope === "today" ? t("missions.reportsToday") : t("missions.reportsThisWeek");
 
       return (
         <View
@@ -199,18 +204,18 @@ export function MissionsScreen() {
           ]}
         >
           <View style={styles.missionTop}>
-            <Text style={[styles.missionTitle, { flex: 1 }]}>{mission.title}</Text>
+            <Text style={[styles.missionTitle, { flex: 1 }]}>{missionTitle}</Text>
             <View style={[styles.rewardBadge, isDaily ? styles.rewardBadgeDaily : styles.rewardBadgeWeekly]}>
               <Text style={styles.rewardText}>{mission.reward}</Text>
             </View>
           </View>
 
-          <Text style={styles.missionDesc}>{mission.description}</Text>
+          <Text style={styles.missionDesc}>{missionDescription}</Text>
 
           <View style={styles.progressHeaderRow}>
-            <Text style={styles.progressLabel}>{progress.current}/{progress.target} {mission.progressLabel}</Text>
+            <Text style={styles.progressLabel}>{progress.current}/{progress.target} {progressLabel}</Text>
             <Text style={[styles.progressPercent, progress.completed ? styles.progressDone : null]}>
-              {progress.completed ? (claimed ? "Claimed" : "Ready") : `${safePercent}%`}
+              {progress.completed ? (claimed ? t("missions.claimed") : t("missions.ready")) : t("missions.percentDone", { percent: safePercent })}
             </Text>
           </View>
 
@@ -222,9 +227,9 @@ export function MissionsScreen() {
             <Text style={styles.progressHint}>
               {progress.completed
                 ? claimed
-                  ? `Reward added to profile`
-                  : `Tap claim to add +${mission.rewardXP} EcoXP to your profile`
-                : `Keep reporting to fill the bar`}
+                  ? t("missions.rewardAddedToProfile")
+                  : t("missions.tapToClaim", { amount: mission.rewardXP })
+                : t("missions.keepReporting")}
             </Text>
 
             {progress.completed && !claimed ? (
@@ -258,7 +263,7 @@ export function MissionsScreen() {
                 activeOpacity={0.85}
               >
                 <Text style={styles.claimButtonText}>
-                  {claimingMissionId === mission.id ? "Claiming..." : `Claim +${mission.rewardXP} EcoXP`}
+                  {claimingMissionId === mission.id ? t("missions.claiming") : t("missions.claimReward", { amount: mission.rewardXP })}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -266,39 +271,39 @@ export function MissionsScreen() {
         </View>
       );
     },
-    [claimingMissionId, displayName, forceRefreshLeaderboard, isClaimed, loadMissionStats, loadMissions, missionProgressContext, statsUserKey, user]
+    [claimingMissionId, displayName, forceRefreshLeaderboard, isClaimed, loadMissionStats, loadMissions, missionProgressContext, statsUserKey, user, t]
   );
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Missions & Leaderboards</Text>
-        <Text style={styles.subtitle}>One mission from each is shown.</Text>
-        {loadingMissionStats ? <Text style={styles.syncText}>Syncing your mission progress...</Text> : null}
+        <Text style={styles.title}>{t("missions.title")}</Text>
+        <Text style={styles.subtitle}>{t("missions.subtitle")}</Text>
+        {loadingMissionStats ? <Text style={styles.syncText}>{t("missions.syncingProgress")}</Text> : null}
 
         {/* Daily Missions Card */}
         <View style={[styles.card, { borderColor: "#d1fae5" }]}>
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
               <MaterialCommunityIcons name="target" size={20} color="#10b981" />
-              <Text style={styles.cardTitle}>Daily missions</Text>
+              <Text style={styles.cardTitle}>{t("missions.dailyMissions")}</Text>
             </View>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.showMore}
               onPress={() => setShowDailyModal(true)}
             >
-              <Text style={styles.showMoreText}>Show more</Text>
+              <Text style={styles.showMoreText}>{t("missions.showMore")}</Text>
             </TouchableOpacity>
           </View>
           {loadingMissions ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#10b981" />
-              <Text style={styles.loadingText}>Loading missions...</Text>
+              <Text style={styles.loadingText}>{t("missions.loadingMissions")}</Text>
             </View>
           ) : dailyMissions.length > 0 ? (
             renderMissionCard(dailyMissions[0], "daily")
           ) : (
-            <Text style={styles.noMissionsText}>No daily missions available.</Text>
+            <Text style={styles.noMissionsText}>{t("missions.noDailyMissions")}</Text>
           )}
         </View>
 
@@ -307,24 +312,24 @@ export function MissionsScreen() {
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
               <Ionicons name="trophy" size={20} color="#c084fc" />
-              <Text style={styles.cardTitle}>Weekly missions</Text>
+              <Text style={styles.cardTitle}>{t("missions.weeklyMissions")}</Text>
             </View>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.showMore, { backgroundColor: "#faf5ff" }]}
               onPress={() => setShowWeeklyModal(true)}
             >
-              <Text style={[styles.showMoreText, { color: "#9333ea" }]}>Show more</Text>
+              <Text style={[styles.showMoreText, { color: "#9333ea" }]}>{t("missions.showMore")}</Text>
             </TouchableOpacity>
           </View>
           {loadingMissions ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="small" color="#c084fc" />
-              <Text style={styles.loadingText}>Loading missions...</Text>
+              <Text style={styles.loadingText}>{t("missions.loadingMissions")}</Text>
             </View>
           ) : weeklyMissions.length > 0 ? (
             renderMissionCard(weeklyMissions[0], "weekly")
           ) : (
-            <Text style={styles.noMissionsText}>No weekly missions available.</Text>
+            <Text style={styles.noMissionsText}>{t("missions.noWeeklyMissions")}</Text>
           )}
         </View>
 
@@ -332,13 +337,13 @@ export function MissionsScreen() {
         <View style={[styles.card, { borderColor: "#fde68a" }]}>
           <View style={styles.cardTitleRow}>
             <MaterialCommunityIcons name="crown" size={22} color="#fbbf24" />
-            <Text style={styles.cardTitle}>Leaderboards</Text>
+            <Text style={styles.cardTitle}>{t("missions.leaderboards")}</Text>
           </View>
-          <Text style={[styles.missionTitle, { color: "#059669", marginTop: 12, marginBottom: 8 }]}>Daily Top 3</Text>
+          <Text style={[styles.missionTitle, { color: "#059669", marginTop: 12, marginBottom: 8 }]}>{t("missions.dailyTop3")}</Text>
           {loadingLeaderboard ? (
             <View style={styles.leaderboardStateRow}>
               <ActivityIndicator size="small" color="#059669" />
-              <Text style={styles.leaderboardStateText}>Loading leaderboard...</Text>
+              <Text style={styles.leaderboardStateText}>{t("missions.loadingLeaderboard")}</Text>
             </View>
           ) : leaderboardError ? (
             <View style={styles.leaderboardStateRow}>
@@ -346,7 +351,7 @@ export function MissionsScreen() {
             </View>
           ) : leaderboard.length === 0 ? (
             <View style={styles.leaderboardStateRow}>
-              <Text style={styles.leaderboardStateText}>No player scores yet. Add reports to appear here.</Text>
+              <Text style={styles.leaderboardStateText}>{t("missions.noScoresYet")}</Text>
             </View>
           ) : (
             leaderboard.map((e) => {
@@ -375,7 +380,7 @@ export function MissionsScreen() {
             <TouchableOpacity onPress={() => setShowDailyModal(false)}>
               <Ionicons name="chevron-back" size={28} color="#1e293b" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>All Daily Missions</Text>
+            <Text style={styles.modalTitle}>{t("missions.allDailyMissions")}</Text>
             <View style={{ width: 28 }} />
           </View>
           <ScrollView contentContainerStyle={styles.modalContent}>
@@ -398,7 +403,7 @@ export function MissionsScreen() {
             <TouchableOpacity onPress={() => setShowWeeklyModal(false)}>
               <Ionicons name="chevron-back" size={28} color="#1e293b" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>All Weekly Missions</Text>
+            <Text style={styles.modalTitle}>{t("missions.allWeeklyMissions")}</Text>
             <View style={{ width: 28 }} />
           </View>
           <ScrollView contentContainerStyle={styles.modalContent}>

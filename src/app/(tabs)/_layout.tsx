@@ -2,9 +2,11 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { Platform } from "react-native";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const isAndroid = Platform.OS === "android";
 
   const tabBarPaddingBottom = isAndroid
@@ -39,11 +41,11 @@ export default function TabsLayout() {
         },
       })}
     >
-      <Tabs.Screen name="home" options={{ title: "Home" }} />
-      <Tabs.Screen name="map" options={{ title: "Map" }} />
-      <Tabs.Screen name="report" options={{ title: "Report" }} />
-      <Tabs.Screen name="missions" options={{ title: "Missions" }} />
-      <Tabs.Screen name="profile" options={{ title: "Profile" }} />
+      <Tabs.Screen name="home" options={{ title: t("tabs.home") }} />
+      <Tabs.Screen name="map" options={{ title: t("tabs.map") }} />
+      <Tabs.Screen name="report" options={{ title: t("tabs.report") }} />
+      <Tabs.Screen name="missions" options={{ title: t("tabs.missions") }} />
+      <Tabs.Screen name="profile" options={{ title: t("tabs.profile") }} />
     </Tabs>
   );
 

@@ -8,6 +8,37 @@ Legend: 🔴 Critical · 🟠 High · 🟡 Medium · 🟢 Low
 
 ---
 
+## ✅ New Features (2026-09-07): Bin Condition Reporting & Albanian/English i18n
+
+### 1. Bin condition reporting (Full / Damaged / Delete) — done, live-verified
+
+Tapping a bin marker now opens a details sheet instead of immediately deleting it. The sheet shows location, placement source, current status (with who/when it was last reported), a 3-action row (Full / Damaged / Delete), and a scrollable report history.
+
+- **Schema** (`supabase/migrations/0007_bin_reports.sql`, applied live): `bins` gained `current_status` (`'full' | 'damaged' | NULL`), `status_updated_at`, `status_reported_by`. New `bin_reports` table (`bin_id`, `reported_by`, `status`, `resolved`, `resolved_at`, `created_at`) — the `resolved`/`resolved_at` columns exist specifically so a future municipality/Pastrimi dashboard can query "which reports are still open" without a schema change; nothing reads/writes them yet beyond the default.
+- **RLS**: public SELECT on `bin_reports` (matches the existing `bins` transparency model), authenticated-only INSERT, `reported_by` force-set server-side via a `BEFORE INSERT` trigger (`auth.uid()`, not client-supplied) — a client cannot forge another user's report.
+- **Propagation**: an `AFTER INSERT` trigger (`SECURITY DEFINER`) atomically writes the new status onto the parent `bins` row in the same transaction as the report insert — no separate client round-trip, no window where the two can disagree.
+- **Realtime**: `bin_reports` added to the `supabase_realtime` publication; status changes ride the existing `bins` UPDATE subscription, so User B sees User A's Full/Damaged report with no app restart.
+- **Delete**: unchanged from the existing any-authenticated-user policy (see item A above); `MapScreen.tsx`'s `removeBin` now also clears `selectedBin` if the deleted bin is the one currently open in the details sheet, and the sheet re-resolves against the live `bins` array (`liveSelectedBin`) so a status change from another device — or the bin's own deletion — is reflected immediately while the sheet is open, with no stale marker/route left behind.
+- **Test**: `scripts/verify-rls.mjs` extended with anon-INSERT-denied and public-SELECT checks for `bin_reports` (9/9 passing, live). A full authenticated-client round trip (real signup → confirm → sign-in → insert a report → confirm the bin row updated) was run once against the live database and cleaned up.
+- **Not yet done**: no on-device test (two real devices/sessions confirming User A's report appears live on User B's map) — needs a physical device.
+
+**Files:** `supabase/migrations/0007_bin_reports.sql`, `src/lib/bins.ts`, `src/native/screens/MapScreen.tsx`, `scripts/verify-rls.mjs`, `src/lib/__tests__/route.test.ts` (fixture update only).
+
+### 2. Albanian / English language support — done
+
+A centralized i18n system, not scattered per-component strings. Every screen now sources its text through it.
+
+- **Architecture**: `src/lib/i18n/en.ts` is the canonical dictionary; `src/lib/i18n/sq.ts` is typed as `const sq: Translations = {...}` where `Translations = typeof en` — a missing or misspelled key in the Albanian file is a **TypeScript compile error**, not a silent runtime fallback or a manual-review checklist item. `I18nContext.tsx` provides `useI18n() → { language, setLanguage, t }`; `t()` additionally warns in dev (`__DEV__`) on any key that still resolves to nothing, and falls back to English then the raw key so a bad key never crashes the app.
+- **Persistence**: selected language is written to `AsyncStorage` (`bingo:language:v1`) and restored on app launch — survives app close/restart and logout/login (it's independent of auth state).
+- **Coverage**: every screen wired — Welcome, Register, Home, tab bar labels, Report (camera flow + tips), Reset Password, Profile (login/forgot-password/paste-code/set-new-password/authenticated dashboard/stats/breakdown/recent captures/logout), Missions (mission cards, both "show more" modals, leaderboard, claim flow), Map (header, markers, footer, the new bin-details sheet, the `Alert.alert` remove-bin confirmation), and the web fallback `MapScreen.web.tsx`. Mission catalog copy (10 mission titles/descriptions) and waste-category labels are looked up by their existing stable IDs (`missionCatalog.<id>.title`, `categories.<category>`) rather than duplicating the English text as literal keys, so the underlying data models (`missions.ts`, `trashStats.ts`) didn't need restructuring. "EcoXP" is deliberately kept untranslated in both languages — it's used as a brand/game term everywhere in the existing dictionary, not translated prose.
+- **Language selector**: added inside Profile (authenticated dashboard), a two-button 🇬🇧 English / 🇦🇱 Shqip row, wired to `setLanguage`.
+- **Verification**: full-project grep for hardcoded JSX/`Alert.alert` English strings outside `src/lib/i18n/*` returns nothing; `tsc --noEmit` clean; `eslint` clean (0 warnings, including the two intentionally-suppressed `react-hooks/exhaustive-deps` cases for mount-once effects that must not re-run on a language switch — commented inline); `vitest run` 39/39 passing; `expo export --platform android` bundles cleanly (1423 modules).
+- **Not yet done**: no on-device manual test of switching EN→SQ/SQ→EN and confirming persistence across restart/logout — needs a physical device.
+
+**Files:** `src/lib/i18n/en.ts`, `src/lib/i18n/sq.ts`, `src/lib/i18n/I18nContext.tsx`, `src/app/_layout.tsx`, every file under `src/native/screens/`, `src/app/(tabs)/_layout.tsx`.
+
+---
+
 ## 🚨 User-Reported Issues (2026-09-07) — investigated, documented, not yet implemented
 
 Two issues reported directly after testing. Both were investigated by reading the actual pre-session code (via `git diff HEAD` — nothing from this whole roadmap effort has been committed yet, so `HEAD`, commit `90e3e30`, is the true "before" baseline) and, for the points system, by running a real live test against the production database. Nothing below has been implemented — this is documentation of confirmed findings and a recommended direction, per the request to plan before touching Maps again and to treat points as a critical investigation first.

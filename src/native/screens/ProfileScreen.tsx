@@ -21,11 +21,13 @@ import {
 } from "../../lib/supabase";
 import { useAuth } from "../../lib/AuthContext";
 import { fetchUserEcoXpFromDb, getCaptureStats } from "../../lib/trashStats";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 const XP_PER_LEVEL = 5000;
 
 export function ProfileScreen() {
   const router = useRouter();
+  const { t, language, setLanguage } = useI18n();
   const { user, isAuthenticated, isGuest, displayName, userKey, continueAsGuest, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -85,7 +87,7 @@ export function ProfileScreen() {
     setResendStatus(null);
 
     if (!email.trim() || !password) {
-      setAuthMessage("Email and password are required.");
+      setAuthMessage(t("profile.emailAndPasswordRequired"));
       return;
     }
 
@@ -102,9 +104,7 @@ export function ProfileScreen() {
     }
 
     if (!supabase) {
-      setAuthMessage(
-        "Supabase client is not configured. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env and restart Expo.",
-      );
+      setAuthMessage(t("register.supabaseNotConfiguredFull"));
       return;
     }
 
@@ -129,7 +129,7 @@ export function ProfileScreen() {
       router.push("/(tabs)/home");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setAuthMessage(message || "Login failed.");
+      setAuthMessage(message || t("profile.loginFailed"));
     } finally {
       setLoading(false);
     }
@@ -147,11 +147,11 @@ export function ProfileScreen() {
       });
 
       setResendStatus(
-        error ? error.message : "Confirmation email sent. Check your inbox.",
+        error ? error.message : t("profile.confirmationEmailSent"),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setResendStatus(message || "Could not resend the confirmation email.");
+      setResendStatus(message || t("profile.couldNotResendConfirmation"));
     } finally {
       setResending(false);
     }
@@ -161,11 +161,11 @@ export function ProfileScreen() {
     setForgotPasswordStatus(null);
 
     if (!email.trim()) {
-      setForgotPasswordStatus("Enter your email above first.");
+      setForgotPasswordStatus(t("profile.enterEmailFirst"));
       return;
     }
     if (!supabase) {
-      setForgotPasswordStatus("Supabase is not configured on this device.");
+      setForgotPasswordStatus(t("profile.supabaseNotConfigured"));
       return;
     }
 
@@ -178,11 +178,11 @@ export function ProfileScreen() {
       setForgotPasswordStatus(
         error
           ? error.message
-          : "If an account exists for that email, a reset link has been sent.",
+          : t("profile.resetEmailSentGeneric"),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setForgotPasswordStatus(message || "Could not send the reset email.");
+      setForgotPasswordStatus(message || t("profile.couldNotSendResetEmail"));
     } finally {
       setSendingResetEmail(false);
     }
@@ -202,11 +202,11 @@ export function ProfileScreen() {
 
     const raw = pastedResetCode.trim();
     if (!raw) {
-      setPasteCodeError("Paste the reset link or code from the email first.");
+      setPasteCodeError(t("profile.pasteCodeFirst"));
       return;
     }
     if (!supabase) {
-      setPasteCodeError("Supabase is not configured on this device.");
+      setPasteCodeError(t("profile.supabaseNotConfigured"));
       return;
     }
 
@@ -220,7 +220,7 @@ export function ProfileScreen() {
         setPasteCodeError(
           error.message.toLowerCase().includes("expired") ||
             error.message.toLowerCase().includes("invalid")
-            ? "This code is invalid or has expired. Send a new reset email and try again quickly."
+            ? t("profile.codeInvalidOrExpired")
             : error.message,
         );
         return;
@@ -235,7 +235,7 @@ export function ProfileScreen() {
       setCodeVerified(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setPasteCodeError(message || "Could not verify that code.");
+      setPasteCodeError(message || t("profile.couldNotVerifyCode"));
     } finally {
       setRedeemingPastedCode(false);
     }
@@ -245,15 +245,15 @@ export function ProfileScreen() {
     setNewPasswordError(null);
 
     if (newPassword.length < 6) {
-      setNewPasswordError("Password must be at least 6 characters.");
+      setNewPasswordError(t("profile.passwordTooShort"));
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      setNewPasswordError("Passwords do not match.");
+      setNewPasswordError(t("profile.passwordsDontMatch"));
       return;
     }
     if (!supabase) {
-      setNewPasswordError("Supabase is not configured on this device.");
+      setNewPasswordError(t("profile.supabaseNotConfigured"));
       return;
     }
 
@@ -274,7 +274,7 @@ export function ProfileScreen() {
       }, 1200);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setNewPasswordError(message || "Could not update the password.");
+      setNewPasswordError(message || t("profile.couldNotUpdatePassword"));
     } finally {
       setSettingNewPassword(false);
     }
@@ -359,29 +359,29 @@ export function ProfileScreen() {
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <ScrollView contentContainerStyle={styles.loginContent}>
           <View style={styles.loginCard}>
-            <Text style={styles.loginTitle}>Set new password</Text>
+            <Text style={styles.loginTitle}>{t("profile.setNewPasswordTitle")}</Text>
             <Text style={styles.loginNote}>
-              Your reset code was verified. Choose a new password below.
+              {t("profile.setNewPasswordNote")}
             </Text>
 
             {newPasswordSuccess ? (
-              <Text style={styles.resendStatus}>Password updated. Taking you to the app…</Text>
+              <Text style={styles.resendStatus}>{t("profile.passwordUpdatedSigningIn")}</Text>
             ) : (
               <>
-                <Text style={styles.label}>NEW PASSWORD</Text>
+                <Text style={styles.label}>{t("profile.newPasswordLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter new password"
+                  placeholder={t("profile.newPasswordPlaceholder")}
                   placeholderTextColor="#94a3b8"
                   secureTextEntry
                   value={newPassword}
                   onChangeText={setNewPassword}
                 />
 
-                <Text style={styles.label}>CONFIRM PASSWORD</Text>
+                <Text style={styles.label}>{t("profile.confirmPasswordLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Re-enter new password"
+                  placeholder={t("profile.confirmPasswordPlaceholder")}
                   placeholderTextColor="#94a3b8"
                   secureTextEntry
                   value={confirmNewPassword}
@@ -401,7 +401,7 @@ export function ProfileScreen() {
                   {settingNewPassword ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.loginBtnText}>Set new password</Text>
+                    <Text style={styles.loginBtnText}>{t("profile.setNewPasswordBtn")}</Text>
                   )}
                 </TouchableOpacity>
               </>
@@ -419,15 +419,15 @@ export function ProfileScreen() {
           <View style={styles.loginCard}>
             {forgotPasswordMode ? (
               <>
-                <Text style={styles.loginTitle}>Reset password</Text>
+                <Text style={styles.loginTitle}>{t("profile.resetPasswordTitle")}</Text>
                 <Text style={styles.loginNote}>
-                  Enter your account email — we will send a link to set a new password.
+                  {t("profile.resetPasswordNote")}
                 </Text>
 
-                <Text style={styles.label}>EMAIL</Text>
+                <Text style={styles.label}>{t("profile.emailLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="name@example.com"
+                  placeholder={t("profile.emailPlaceholder")}
                   placeholderTextColor="#94a3b8"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -448,21 +448,19 @@ export function ProfileScreen() {
                   {sendingResetEmail ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.loginBtnText}>Send reset link</Text>
+                    <Text style={styles.loginBtnText}>{t("profile.sendResetLink")}</Text>
                   )}
                 </TouchableOpacity>
 
                 <View style={styles.divider} />
 
                 <Text style={styles.loginNote}>
-                  Already got the email? If tapping the link opened a browser
-                  instead of the app, paste the link (or just the code from
-                  its address bar) here:
+                  {t("profile.pasteLinkPrompt")}
                 </Text>
 
                 <TextInput
                   style={styles.input}
-                  placeholder="Paste reset link or code"
+                  placeholder={t("profile.pasteLinkPlaceholder")}
                   placeholderTextColor="#94a3b8"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -483,7 +481,7 @@ export function ProfileScreen() {
                   {redeemingPastedCode ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.loginBtnText}>Continue</Text>
+                    <Text style={styles.loginBtnText}>{t("profile.continueBtn")}</Text>
                   )}
                 </TouchableOpacity>
 
@@ -496,20 +494,20 @@ export function ProfileScreen() {
                     setPasteCodeError(null);
                   }}
                 >
-                  <Text style={styles.skipBtnText}>Back to login</Text>
+                  <Text style={styles.skipBtnText}>{t("profile.backToLogin")}</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
-                <Text style={styles.loginTitle}>Login</Text>
+                <Text style={styles.loginTitle}>{t("profile.login")}</Text>
                 <Text style={styles.loginNote}>
-                  Use your registered email and password.
+                  {t("profile.loginNote")}
                 </Text>
 
-                <Text style={styles.label}>EMAIL</Text>
+                <Text style={styles.label}>{t("profile.emailLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="name@example.com"
+                  placeholder={t("profile.emailPlaceholder")}
                   placeholderTextColor="#94a3b8"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -517,10 +515,10 @@ export function ProfileScreen() {
                   onChangeText={setEmail}
                 />
 
-                <Text style={styles.label}>PASSWORD</Text>
+                <Text style={styles.label}>{t("profile.passwordLabel")}</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="Enter password"
+                  placeholder={t("profile.passwordPlaceholder")}
                   placeholderTextColor="#94a3b8"
                   secureTextEntry
                   value={password}
@@ -535,7 +533,7 @@ export function ProfileScreen() {
                     setForgotPasswordStatus(null);
                   }}
                 >
-                  <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                  <Text style={styles.forgotPasswordText}>{t("profile.forgotPassword")}</Text>
                 </TouchableOpacity>
 
                 {authMessage ? (
@@ -549,7 +547,7 @@ export function ProfileScreen() {
                     disabled={resending}
                   >
                     <Text style={styles.resendBtnText}>
-                      {resending ? "Sending..." : "Resend confirmation email"}
+                      {resending ? t("profile.sendingEllipsis") : t("profile.resendConfirmation")}
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -567,7 +565,7 @@ export function ProfileScreen() {
                   {loading ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.loginBtnText}>Login</Text>
+                    <Text style={styles.loginBtnText}>{t("profile.login")}</Text>
                   )}
                 </TouchableOpacity>
 
@@ -575,7 +573,7 @@ export function ProfileScreen() {
                   style={styles.skipBtn}
                   onPress={continueAsGuest}
                 >
-                  <Text style={styles.skipBtnText}>Skip for now</Text>
+                  <Text style={styles.skipBtnText}>{t("profile.skipForNow")}</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -597,24 +595,23 @@ export function ProfileScreen() {
               </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.usernameLabel}>USERNAME</Text>
-              <Text style={styles.username}>{isGuest && !user ? "Guest" : displayName}</Text>
+              <Text style={styles.usernameLabel}>{t("profile.username")}</Text>
+              <Text style={styles.username}>{isGuest && !user ? t("profile.guest") : displayName}</Text>
               {userEmail && <Text style={styles.userEmail}>{userEmail}</Text>}
             </View>
           </View>
 
           <View style={styles.xpBox}>
-            <Text style={styles.xpLabel}>Total EcoXP</Text>
+            <Text style={styles.xpLabel}>{t("profile.totalEcoXp")}</Text>
             <Text style={styles.xpValue}>{totalEcoXp.toLocaleString()}</Text>
             <Text style={styles.xpSub}>
-              Level {level} • {xpRemaining.toLocaleString()} needed
-              for next level
+              {t("profile.levelXpRemaining", { level, count: xpRemaining.toLocaleString() })}
             </Text>
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: levelProgress as any }]} />
             </View>
             <Text style={styles.progressLabel}>
-              {levelProgress} to level {level + 1}
+              {t("profile.levelProgress", { percent: levelProgress, level: level + 1 })}
             </Text>
           </View>
         </View>
@@ -623,7 +620,7 @@ export function ProfileScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Ionicons name="flash" size={20} color="#fbbf24" />
-            <Text style={styles.cardTitle}>Stats</Text>
+            <Text style={styles.cardTitle}>{t("profile.stats")}</Text>
           </View>
           <View style={styles.statsGrid}>
             {[
@@ -632,36 +629,36 @@ export function ProfileScreen() {
                 color: "#059669",
                 bg: "#ecfdf5",
                 border: "#a7f3d0",
-                label: "PHOTOS",
+                label: t("profile.photos"),
                 value: String(stats?.total ?? 0),
-                sub: "Photos classified",
+                sub: t("profile.photosClassified"),
               },
               {
                 icon: "analytics-outline",
                 color: "#0f766e",
                 bg: "#f0fdfa",
                 border: "#99f6e4",
-                label: "RATE",
+                label: t("profile.rate"),
                 value: String(stats?.weeklyRate ?? 0),
-                sub: "Daily avg (7d)",
+                sub: t("profile.dailyAvg"),
               },
               {
                 icon: "leaf-outline",
                 color: "#047857",
                 bg: "#dcfce7",
                 border: "#86efac",
-                label: "ECO XP",
+                label: t("profile.ecoXp"),
                 value: String(totalEcoXp),
-                sub: "Total EcoXP",
+                sub: t("profile.totalEcoXp"),
               },
               {
                 icon: "flame-outline",
                 color: "#065f46",
                 bg: "#ecfdf5",
                 border: "#6ee7b7",
-                label: "STREAK",
+                label: t("profile.streak"),
                 value: String(stats?.streak ?? 0),
-                sub: "Active days",
+                sub: t("profile.activeDays"),
               },
             ].map((s, i) => (
               <View
@@ -687,7 +684,7 @@ export function ProfileScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Ionicons name="layers-outline" size={20} color="#059669" />
-            <Text style={styles.cardTitle}>Waste Breakdown</Text>
+            <Text style={styles.cardTitle}>{t("profile.wasteBreakdown")}</Text>
           </View>
 
           {(stats?.breakdown ?? []).map((item, index) => (
@@ -704,10 +701,10 @@ export function ProfileScreen() {
               <Text style={styles.rankNumber}>{index + 1}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.rankLabel, { color: item.colors.text }]}>
-                  {item.label}
+                  {t(`categories.${item.category}` as const)}
                 </Text>
                 <Text style={styles.rankSub}>
-                  {item.percent}% of your reports
+                  {t("profile.percentOfReports", { percent: item.percent })}
                 </Text>
               </View>
               <Text style={styles.rankCount}>{item.count}</Text>
@@ -718,7 +715,7 @@ export function ProfileScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Ionicons name="images-outline" size={20} color="#059669" />
-            <Text style={styles.cardTitle}>Recent Captures</Text>
+            <Text style={styles.cardTitle}>{t("profile.recentCaptures")}</Text>
           </View>
 
           <ScrollView
@@ -747,7 +744,7 @@ export function ProfileScreen() {
                     source={{ uri: photo.uri }}
                     style={styles.photoThumb}
                   />
-                  <Text style={styles.photoLabel}>{photo.category}</Text>
+                  <Text style={styles.photoLabel}>{t(`categories.${photo.category}` as const)}</Text>
                 </Animated.View>
               );
             })}
@@ -755,13 +752,43 @@ export function ProfileScreen() {
 
           {(stats?.recentPhotos?.length ?? 0) === 0 ? (
             <Text style={styles.emptyHint}>
-              No photos yet. Capture trash from Report to populate this section.
+              {t("profile.noPhotosYet")}
             </Text>
           ) : null}
         </View>
 
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Ionicons name="language-outline" size={20} color="#059669" />
+            <Text style={styles.cardTitle}>{t("profile.language")}</Text>
+          </View>
+          <View style={styles.languageRow}>
+            <TouchableOpacity
+              style={[styles.languageOption, language === "en" && styles.languageOptionActive]}
+              onPress={() => setLanguage("en")}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.languageFlag}>🇬🇧</Text>
+              <Text style={[styles.languageText, language === "en" && styles.languageTextActive]}>
+                {t("profile.languageEnglish")}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.languageOption, language === "sq" && styles.languageOptionActive]}
+              onPress={() => setLanguage("sq")}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.languageFlag}>🇦🇱</Text>
+              <Text style={[styles.languageText, language === "sq" && styles.languageTextActive]}>
+                {t("profile.languageAlbanian")}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Log out</Text>
+          <Text style={styles.logoutText}>{t("profile.logout")}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -938,6 +965,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   emptyHint: { color: "#64748b", fontSize: 12 },
+  languageRow: { flexDirection: "row", gap: 10 },
+  languageOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#ecfdf5",
+    borderWidth: 1,
+    borderColor: "#a7f3d0",
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
+  languageOptionActive: {
+    backgroundColor: "#10b981",
+    borderColor: "#10b981",
+  },
+  languageFlag: { fontSize: 18 },
+  languageText: { color: "#059669", fontWeight: "600", fontSize: 14 },
+  languageTextActive: { color: "#fff" },
   logoutBtn: {
     backgroundColor: "#fee2e2",
     borderRadius: 12,

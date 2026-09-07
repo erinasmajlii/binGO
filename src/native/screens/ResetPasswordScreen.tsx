@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 type Stage = "verifying" | "ready" | "invalid";
 
@@ -23,6 +24,7 @@ type Stage = "verifying" | "ready" | "invalid";
  * new password via supabase.auth.updateUser().
  */
 export function ResetPasswordScreen() {
+  const { t } = useI18n();
   const [stage, setStage] = useState<Stage>("verifying");
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
@@ -53,7 +55,7 @@ export function ResetPasswordScreen() {
           setStage("ready");
         } else {
           setStage("invalid");
-          setError("No active reset session found. Start over from the login screen.");
+          setError(t("resetPassword.noActiveSession"));
         }
         return;
       }
@@ -62,7 +64,7 @@ export function ResetPasswordScreen() {
       if (!code || typeof code !== "string") {
         if (mounted) {
           setStage("invalid");
-          setError("This reset link is missing its verification code.");
+          setError(t("resetPassword.invalidLinkMissingCode"));
         }
         return;
       }
@@ -70,7 +72,7 @@ export function ResetPasswordScreen() {
       if (!supabase) {
         if (mounted) {
           setStage("invalid");
-          setError("Supabase is not configured on this device.");
+          setError(t("profile.supabaseNotConfigured"));
         }
         return;
       }
@@ -83,7 +85,7 @@ export function ResetPasswordScreen() {
         setStage("invalid");
         setError(
           exchangeError.message.toLowerCase().includes("expired")
-            ? "This reset link has expired. Request a new one from the login screen."
+            ? t("resetPassword.invalidLinkExpired")
             : exchangeError.message,
         );
         return;
@@ -99,21 +101,22 @@ export function ResetPasswordScreen() {
       mounted = false;
       subscription.remove();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once: must not re-redeem the deep-link code on language change
   }, []);
 
   const handleSetPassword = async () => {
     setError(null);
 
     if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+      setError(t("profile.passwordTooShort"));
       return;
     }
     if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+      setError(t("profile.passwordsDontMatch"));
       return;
     }
     if (!supabase) {
-      setError("Supabase is not configured on this device.");
+      setError(t("profile.supabaseNotConfigured"));
       return;
     }
 
@@ -129,7 +132,7 @@ export function ResetPasswordScreen() {
       setTimeout(() => router.replace("/(tabs)/home"), 1200);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setError(message || "Could not update the password.");
+      setError(message || t("profile.couldNotUpdatePassword"));
     } finally {
       setSubmitting(false);
     }
@@ -141,40 +144,40 @@ export function ResetPasswordScreen() {
         <Text style={styles.title}>
           bin<Text style={styles.titleBold}>Go</Text>
         </Text>
-        <Text style={styles.subtitle}>Reset your password</Text>
+        <Text style={styles.subtitle}>{t("resetPassword.subtitle")}</Text>
 
         {stage === "verifying" ? (
           <View style={styles.stateBox}>
             <ActivityIndicator color="#10b981" />
-            <Text style={styles.stateText}>Verifying your reset link…</Text>
+            <Text style={styles.stateText}>{t("resetPassword.verifying")}</Text>
           </View>
         ) : null}
 
         {stage === "invalid" ? (
           <View style={styles.stateBox}>
-            <Text style={styles.errorText}>{error || "This reset link is invalid."}</Text>
+            <Text style={styles.errorText}>{error || t("resetPassword.invalidLinkGeneric")}</Text>
             <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.replace("/(tabs)/profile")}>
-              <Text style={styles.secondaryBtnText}>Back to login</Text>
+              <Text style={styles.secondaryBtnText}>{t("profile.backToLogin")}</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
         {stage === "ready" && !success ? (
           <View style={styles.formBox}>
-            <Text style={styles.label}>NEW PASSWORD</Text>
+            <Text style={styles.label}>{t("profile.newPasswordLabel")}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter new password"
+              placeholder={t("profile.newPasswordPlaceholder")}
               placeholderTextColor="#94a3b8"
               secureTextEntry
               value={password}
               onChangeText={setPassword}
             />
 
-            <Text style={styles.label}>CONFIRM PASSWORD</Text>
+            <Text style={styles.label}>{t("profile.confirmPasswordLabel")}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Re-enter new password"
+              placeholder={t("profile.confirmPasswordPlaceholder")}
               placeholderTextColor="#94a3b8"
               secureTextEntry
               value={confirmPassword}
@@ -192,7 +195,7 @@ export function ResetPasswordScreen() {
               {submitting ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryBtnText}>Set new password</Text>
+                <Text style={styles.primaryBtnText}>{t("profile.setNewPasswordBtn")}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -200,7 +203,7 @@ export function ResetPasswordScreen() {
 
         {success ? (
           <View style={styles.stateBox}>
-            <Text style={styles.successText}>Password updated. Signing you in…</Text>
+            <Text style={styles.successText}>{t("profile.passwordUpdatedSigningIn")}</Text>
           </View>
         ) : null}
       </ScrollView>

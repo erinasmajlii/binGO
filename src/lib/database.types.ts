@@ -39,38 +39,99 @@ export type Database = {
   }
   public: {
     Tables: {
+      bin_reports: {
+        Row: {
+          bin_id: string
+          created_at: string
+          id: string
+          reported_by: string | null
+          resolved: boolean
+          resolved_at: string | null
+          status: string
+        }
+        Insert: {
+          bin_id: string
+          created_at?: string
+          id?: string
+          reported_by?: string | null
+          resolved?: boolean
+          resolved_at?: string | null
+          status: string
+        }
+        Update: {
+          bin_id?: string
+          created_at?: string
+          id?: string
+          reported_by?: string | null
+          resolved?: boolean
+          resolved_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bin_reports_bin_id_fkey"
+            columns: ["bin_id"]
+            isOneToOne: false
+            referencedRelation: "bins"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bin_reports_reported_by_fkey"
+            columns: ["reported_by"]
+            isOneToOne: false
+            referencedRelation: "display_exp"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       bins: {
         Row: {
           created_at: string | null
           created_by: string | null
+          current_status: string | null
           id: string
           latitude: number
           longitude: number
           source: string
+          status_reported_by: string | null
+          status_updated_at: string | null
           updated_at: string | null
         }
         Insert: {
           created_at?: string | null
           created_by?: string | null
+          current_status?: string | null
           id: string
           latitude: number
           longitude: number
           source?: string
+          status_reported_by?: string | null
+          status_updated_at?: string | null
           updated_at?: string | null
         }
         Update: {
           created_at?: string | null
           created_by?: string | null
+          current_status?: string | null
           id?: string
           latitude?: number
           longitude?: number
           source?: string
+          status_reported_by?: string | null
+          status_updated_at?: string | null
           updated_at?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "bins_created_by_fkey"
             columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "display_exp"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "bins_status_reported_by_fkey"
+            columns: ["status_reported_by"]
             isOneToOne: false
             referencedRelation: "display_exp"
             referencedColumns: ["user_id"]

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from "react-native";
 import { router } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 type RecycleIconProps = {
   size: number;
@@ -84,6 +85,8 @@ function TrashCanHero() {
 }
 
 export function WelcomeScreen() {
+  const { t } = useI18n();
+
   return (
     <View style={styles.container}>
       {/* Decorative circles */}
@@ -99,10 +102,10 @@ export function WelcomeScreen() {
 
         <TrashCanHero />
 
-        <Text style={styles.tagline}>Manage your waste effectively!</Text>
+        <Text style={styles.tagline}>{t("welcome.tagline")}</Text>
 
         <TouchableOpacity style={styles.button} onPress={() => router.push("/register")} activeOpacity={0.85}>
-          <Text style={styles.buttonText}>Get Started</Text>
+          <Text style={styles.buttonText}>{t("welcome.getStarted")}</Text>
         </TouchableOpacity>
       </View>
     </View>

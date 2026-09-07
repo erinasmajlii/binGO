@@ -6,7 +6,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Modal,
+  ScrollView,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, {
   LatLng,
@@ -19,14 +22,19 @@ import { useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
 import {
   BinMarker,
+  BinReport,
+  BinStatus,
   loadBins,
   addBinToDatabase,
   removeBinFromDatabase,
+  reportBinStatus,
+  fetchBinReports,
   subscribeToBinsRealtimeUpdates,
   RealtimeConnectionStatus,
 } from "../../lib/bins";
 import { distanceInMeters, formatDistance } from "../../lib/geo";
 import { useAuth } from "../../lib/AuthContext";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 import { clearActiveRoute, getActiveRoute } from "../../lib/route";
 
@@ -39,6 +47,7 @@ const initialRegion: Region = {
 
 export function MapScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const { user } = useAuth();
   const [location, setLocation] =
     useState<Location.LocationObjectCoords | null>(null);
@@ -58,6 +67,10 @@ export function MapScreen() {
   const [isRouting, setIsRouting] = useState(false);
   const [isAddingBin, setIsAddingBin] = useState(false);
   const [liveStatus, setLiveStatus] = useState<RealtimeConnectionStatus>("connected");
+  const [selectedBin, setSelectedBin] = useState<BinMarker | null>(null);
+  const [binReports, setBinReports] = useState<BinReport[]>([]);
+  const [loadingBinReports, setLoadingBinReports] = useState(false);
+  const [submittingReport, setSubmittingReport] = useState(false);
   const mapRef = useRef<MapView | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -109,9 +122,7 @@ export function MapScreen() {
         );
       } catch (err) {
         console.error("Location error:", err);
-        setErrorMessage(
-          "Could not read your location. Check device settings and GPS.",
-        );
+        setErrorMessage(t("map.couldNotReadLocation"));
         setMapInitialRegion(initialRegion);
       } finally {
         setLoading(false);
@@ -121,6 +132,7 @@ export function MapScreen() {
     return () => {
       subscription?.remove();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once: must not re-request location permission / re-subscribe on language change
   }, []);
 
   useEffect(() => {
@@ -418,12 +430,12 @@ export function MapScreen() {
     if (isAddingBin) return;
 
     if (!user) {
-      setErrorMessage("Sign in to add bins to the shared map.");
+      setErrorMessage(t("map.signInToAddBins"));
       return;
     }
 
     if (!location) {
-      setErrorMessage("Current location is not available yet.");
+      setErrorMessage(t("map.locationNotAvailable"));
       return;
     }
 
@@ -437,7 +449,7 @@ export function MapScreen() {
         ) < 3,
     );
     if (existsNearby) {
-      setErrorMessage("A bin already exists at this location.");
+      setErrorMessage(t("map.binAlreadyExists"));
       return;
     }
 
@@ -446,16 +458,18 @@ export function MapScreen() {
       latitude: location.latitude,
       longitude: location.longitude,
       source: "current",
+      currentStatus: null,
+      statusUpdatedAt: null,
     };
 
     setIsAddingBin(true);
     try {
       const saved = await addBinToDatabase(newBin);
       if (saved) {
-        setBins((prev) => [...prev, newBin]);
+        setBins((prev) => [...prev, saved]);
         setErrorMessage(null);
       } else {
-        setErrorMessage("Could not add this bin. Check your connection and try again.");
+        setErrorMessage(t("map.couldNotAddBin"));
       }
     } finally {
       setIsAddingBin(false);
@@ -466,7 +480,7 @@ export function MapScreen() {
     if (isAddingBin) return;
 
     if (!user) {
-      setErrorMessage("Sign in to add bins to the shared map.");
+      setErrorMessage(t("map.signInToAddBins"));
       return;
     }
 
@@ -477,7 +491,7 @@ export function MapScreen() {
         distanceInMeters(bin.latitude, bin.longitude, latitude, longitude) < 3,
     );
     if (existsNearby) {
-      setErrorMessage("A bin already exists at this location.");
+      setErrorMessage(t("map.binAlreadyExists"));
       return;
     }
 
@@ -486,16 +500,18 @@ export function MapScreen() {
       latitude,
       longitude,
       source: "manual",
+      currentStatus: null,
+      statusUpdatedAt: null,
     };
 
     setIsAddingBin(true);
     try {
       const saved = await addBinToDatabase(newBin);
       if (saved) {
-        setBins((prev) => [...prev, newBin]);
+        setBins((prev) => [...prev, saved]);
         setErrorMessage(null);
       } else {
-        setErrorMessage("Could not add this bin. Check your connection and try again.");
+        setErrorMessage(t("map.couldNotAddBin"));
       }
     } finally {
       setIsAddingBin(false);
@@ -504,19 +520,19 @@ export function MapScreen() {
 
   const removeBin = (id: string) => {
     if (!user) {
-      setErrorMessage("Sign in to remove bins from the shared map.");
+      setErrorMessage(t("map.signInToRemoveBins"));
       return;
     }
 
-    Alert.alert("Remove bin", "Do you want to remove this bin marker?", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("map.removeBinTitle"), t("map.removeBinMessage"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Remove",
+        text: t("common.remove"),
         style: "destructive",
         onPress: async () => {
           const removed = await removeBinFromDatabase(id);
           if (!removed) {
-            setErrorMessage("Could not remove this bin. Check your connection and try again.");
+            setErrorMessage(t("map.couldNotRemoveBin"));
             return;
           }
 
@@ -528,6 +544,9 @@ export function MapScreen() {
 
           setBins(nextBins);
           setErrorMessage(null);
+
+          // Don't leave the details modal open on a bin that no longer exists.
+          setSelectedBin((current) => (current?.id === id ? null : current));
 
           if (removedRoutedBin) {
             if (nextBins.length > 0 && location) {
@@ -541,6 +560,65 @@ export function MapScreen() {
     ]);
   };
 
+  const openBinDetails = useCallback(async (bin: BinMarker) => {
+    setSelectedBin(bin);
+    setLoadingBinReports(true);
+    try {
+      const reports = await fetchBinReports(bin.id);
+      setBinReports(reports);
+    } finally {
+      setLoadingBinReports(false);
+    }
+  }, []);
+
+  const closeBinDetails = useCallback(() => {
+    setSelectedBin(null);
+    setBinReports([]);
+  }, []);
+
+  const handleReportStatus = useCallback(
+    async (status: BinStatus) => {
+      if (!selectedBin) return;
+
+      if (!user) {
+        setErrorMessage(t("map.signInToReport"));
+        return;
+      }
+
+      setSubmittingReport(true);
+      try {
+        const success = await reportBinStatus(selectedBin.id, status);
+        if (!success) {
+          setErrorMessage(t("map.couldNotSubmitReport"));
+          return;
+        }
+
+        // Optimistic local update — the realtime subscription will confirm
+        // this shortly, but there's no reason to wait for it to round-trip
+        // before the reporting user sees their own change reflected.
+        const nowIso = new Date().toISOString();
+        setBins((prev) =>
+          prev.map((bin) =>
+            bin.id === selectedBin.id
+              ? { ...bin, currentStatus: status, statusUpdatedAt: nowIso }
+              : bin,
+          ),
+        );
+        setSelectedBin((prev) =>
+          prev && prev.id === selectedBin.id
+            ? { ...prev, currentStatus: status, statusUpdatedAt: nowIso }
+            : prev,
+        );
+        const reports = await fetchBinReports(selectedBin.id);
+        setBinReports(reports);
+        setErrorMessage(null);
+      } finally {
+        setSubmittingReport(false);
+      }
+    },
+    [selectedBin, user, t],
+  );
+
   if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -549,17 +627,25 @@ export function MapScreen() {
     );
   }
 
+  // Re-resolve against the live `bins` list (not the snapshot taken when the
+  // modal opened) so a status change — the reporting user's own optimistic
+  // update, or another device's realtime update — shows immediately while
+  // the modal is still open.
+  const liveSelectedBin = selectedBin
+    ? bins.find((b) => b.id === selectedBin.id) ?? selectedBin
+    : null;
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: Math.max(12, insets.top) }]}>
-        <Text style={styles.title}>Map</Text>
+        <Text style={styles.title}>{t("map.title")}</Text>
         <Text style={styles.subtitle}>
           {permissionDenied
-            ? "Location access is off. Enable it to show your current position."
-            : errorMessage || "Showing your live position on the map."}
+            ? t("map.locationOff")
+            : errorMessage || t("map.showingLivePosition")}
         </Text>
         {liveStatus === "reconnecting" ? (
-          <Text style={styles.liveStatusText}>Reconnecting live map updates…</Text>
+          <Text style={styles.liveStatusText}>{t("map.reconnecting")}</Text>
         ) : null}
       </View>
 
@@ -574,8 +660,8 @@ export function MapScreen() {
         {location ? (
           <Marker
             coordinate={{ latitude: lat, longitude: lon }}
-            title="Your Location"
-            description="This is your current position"
+            title={t("map.yourLocationTitle")}
+            description={t("map.yourLocationDescription")}
           />
         ) : null}
 
@@ -583,17 +669,43 @@ export function MapScreen() {
           <Marker
             key={bin.id}
             coordinate={{ latitude: bin.latitude, longitude: bin.longitude }}
-            title="Bin"
-            onPress={() => removeBin(bin.id)}
+            title={
+              bin.currentStatus === "full"
+                ? t("map.binTitleFull")
+                : bin.currentStatus === "damaged"
+                  ? t("map.binTitleDamaged")
+                  : t("map.binTitlePlain")
+            }
+            onPress={() => openBinDetails(bin)}
             description={
               bin.source === "current"
-                ? "Placed at your current location"
-                : "Placed manually"
+                ? t("map.binDescriptionCurrent")
+                : t("map.binDescriptionManual")
             }
           >
-            <View style={styles.binMarker}>
-              <Text style={styles.binEmoji}>🗑️</Text>
+            <View
+              style={[
+                styles.binMarker,
+                bin.currentStatus === "full" && styles.binMarkerFull,
+                bin.currentStatus === "damaged" && styles.binMarkerDamaged,
+              ]}
+            >
+              <Text style={styles.binEmoji}>
+                {bin.currentStatus === "full" ? "🗑️" : bin.currentStatus === "damaged" ? "⚠️" : "🗑️"}
+              </Text>
             </View>
+            {bin.currentStatus ? (
+              <View
+                style={[
+                  styles.binStatusBadge,
+                  bin.currentStatus === "full" ? styles.binStatusBadgeFull : styles.binStatusBadgeDamaged,
+                ]}
+              >
+                <Text style={styles.binStatusBadgeText}>
+                  {bin.currentStatus === "full" ? t("map.full").toUpperCase() : t("map.damaged").toUpperCase()}
+                </Text>
+              </View>
+            ) : null}
           </Marker>
         ))}
 
@@ -636,15 +748,15 @@ export function MapScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.helperText}>
-          Long press map to place manually. Tap a bin to remove it.
+          {t("map.helperText")}
         </Text>
         {routeDestination ? (
           <View style={styles.routeCard}>
-            <Text style={styles.routeTitle}>Nearest Bin Route</Text>
+            <Text style={styles.routeTitle}>{t("map.nearestBinRoute")}</Text>
             <Text style={styles.routeValue}>
               {isRouting
-                ? "Calculating route..."
-                : `Distance: ${formatDistance(displayDistance)}`}
+                ? t("map.calculatingRoute")
+                : t("map.distanceLabel", { distance: formatDistance(displayDistance) })}
             </Text>
           </View>
         ) : null}
@@ -654,7 +766,7 @@ export function MapScreen() {
           activeOpacity={0.85}
           disabled={isAddingBin}
         >
-          <Text style={styles.buttonText}>{isAddingBin ? "Adding..." : "Add Bin At My Location"}</Text>
+          <Text style={styles.buttonText}>{isAddingBin ? t("map.adding") : t("map.addBinAtLocation")}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.button, styles.spacing, isRouting && styles.buttonDisabled]}
@@ -665,25 +777,156 @@ export function MapScreen() {
               void buildRoute(nearestBin);
               setErrorMessage(null);
             } else {
-              setErrorMessage(
-                "No bins found on the map. Add one to start routing.",
-              );
+              setErrorMessage(t("map.noBinsAddOne"));
               clearRoute();
             }
           }}
           activeOpacity={0.85}
           disabled={isRouting}
         >
-          <Text style={styles.buttonText}>Refresh Route</Text>
+          <Text style={styles.buttonText}>{t("map.refreshRoute")}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.button}
           onPress={recenterMap}
           activeOpacity={0.85}
         >
-          <Text style={styles.buttonText}>Recenter on me</Text>
+          <Text style={styles.buttonText}>{t("map.recenterOnMe")}</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={selectedBin !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={closeBinDetails}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            {liveSelectedBin ? (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalTitle}>{t("map.binDetails")}</Text>
+                <Text style={styles.modalSubtitle}>
+                  {liveSelectedBin.latitude.toFixed(5)}, {liveSelectedBin.longitude.toFixed(5)} ·{" "}
+                  {liveSelectedBin.source === "current" ? t("map.placedAtLocation") : t("map.placedManually")}
+                </Text>
+
+                <View
+                  style={[
+                    styles.modalStatusRow,
+                    liveSelectedBin.currentStatus === "full"
+                      ? styles.modalStatusRowFull
+                      : liveSelectedBin.currentStatus === "damaged"
+                        ? styles.modalStatusRowDamaged
+                        : styles.modalStatusRowClear,
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      liveSelectedBin.currentStatus === "full"
+                        ? "archive"
+                        : liveSelectedBin.currentStatus === "damaged"
+                          ? "warning"
+                          : "checkmark-circle"
+                    }
+                    size={20}
+                    color={
+                      liveSelectedBin.currentStatus === "full"
+                        ? "#b45309"
+                        : liveSelectedBin.currentStatus === "damaged"
+                          ? "#b91c1c"
+                          : "#059669"
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalStatusText}>
+                      {liveSelectedBin.currentStatus === "full"
+                        ? t("map.reportedFull")
+                        : liveSelectedBin.currentStatus === "damaged"
+                          ? t("map.reportedDamaged")
+                          : t("map.noOpenReports")}
+                    </Text>
+                    {liveSelectedBin.statusUpdatedAt ? (
+                      <Text style={styles.modalStatusSubtext}>
+                        {new Date(liveSelectedBin.statusUpdatedAt).toLocaleString()}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+
+                <Text style={styles.modalSectionTitle}>{t("map.reportCondition")}</Text>
+                <View style={styles.modalActionRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionBtn,
+                      styles.modalActionBtnFull,
+                      submittingReport && styles.modalActionBtnDisabled,
+                    ]}
+                    onPress={() => handleReportStatus("full")}
+                    disabled={submittingReport}
+                  >
+                    <Ionicons name="archive" size={18} color="#b45309" />
+                    <Text style={styles.modalActionBtnText}>{t("map.full")}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionBtn,
+                      styles.modalActionBtnDamaged,
+                      submittingReport && styles.modalActionBtnDisabled,
+                    ]}
+                    onPress={() => handleReportStatus("damaged")}
+                    disabled={submittingReport}
+                  >
+                    <Ionicons name="warning" size={18} color="#b91c1c" />
+                    <Text style={styles.modalActionBtnText}>{t("map.damaged")}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, styles.modalActionBtnDelete]}
+                    onPress={() => {
+                      const binId = liveSelectedBin.id;
+                      closeBinDetails();
+                      removeBin(binId);
+                    }}
+                  >
+                    <Ionicons name="trash" size={18} color="#475569" />
+                    <Text style={styles.modalActionBtnText}>{t("common.delete")}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.modalSectionTitle}>
+                  {t("map.recentReports")} {binReports.length > 0 ? `(${binReports.length})` : ""}
+                </Text>
+                {loadingBinReports ? (
+                  <ActivityIndicator size="small" color="#10b981" style={{ marginVertical: 8 }} />
+                ) : binReports.length === 0 ? (
+                  <Text style={styles.modalEmptyText}>{t("map.noReportsYet")}</Text>
+                ) : (
+                  binReports.map((report) => (
+                    <View key={report.id} style={styles.modalReportRow}>
+                      <Ionicons
+                        name={report.status === "full" ? "archive" : "warning"}
+                        size={14}
+                        color={report.status === "full" ? "#b45309" : "#b91c1c"}
+                      />
+                      <Text style={styles.modalReportText}>
+                        {report.status === "full" ? t("map.full") : t("map.damaged")}
+                      </Text>
+                      <Text style={styles.modalReportTime}>
+                        {new Date(report.createdAt).toLocaleString()}
+                      </Text>
+                    </View>
+                  ))
+                )}
+
+                <TouchableOpacity style={styles.modalCloseBtn} onPress={closeBinDetails}>
+                  <Text style={styles.modalCloseBtnText}>{t("common.close")}</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -731,7 +974,174 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  binMarkerFull: {
+    borderColor: "#f59e0b",
+    backgroundColor: "#fffbeb",
+  },
+  binMarkerDamaged: {
+    borderColor: "#dc2626",
+    backgroundColor: "#fef2f2",
+  },
   binEmoji: {
     fontSize: 16,
+  },
+  binStatusBadge: {
+    position: "absolute",
+    top: -6,
+    alignSelf: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  binStatusBadgeFull: {
+    backgroundColor: "#fef3c7",
+    borderColor: "#f59e0b",
+  },
+  binStatusBadgeDamaged: {
+    backgroundColor: "#fee2e2",
+    borderColor: "#dc2626",
+  },
+  binStatusBadgeText: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15,23,42,0.4)",
+  },
+  modalSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: "80%",
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#e2e8f0",
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1e293b",
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: "#64748b",
+    marginBottom: 16,
+  },
+  modalStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  modalStatusRowClear: {
+    backgroundColor: "#ecfdf5",
+    borderColor: "#a7f3d0",
+  },
+  modalStatusRowFull: {
+    backgroundColor: "#fffbeb",
+    borderColor: "#f59e0b",
+  },
+  modalStatusRowDamaged: {
+    backgroundColor: "#fef2f2",
+    borderColor: "#dc2626",
+  },
+  modalStatusText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  modalStatusSubtext: {
+    fontSize: 12,
+    color: "#64748b",
+  },
+  modalSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#475569",
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  modalActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 16,
+  },
+  modalActionBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 4,
+  },
+  modalActionBtnFull: {
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#f59e0b",
+  },
+  modalActionBtnDamaged: {
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#dc2626",
+  },
+  modalActionBtnDelete: {
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+  modalActionBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
+  modalActionBtnDisabled: {
+    opacity: 0.5,
+  },
+  modalReportRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  modalReportText: {
+    fontSize: 13,
+    color: "#1e293b",
+    fontWeight: "600",
+  },
+  modalReportTime: {
+    fontSize: 11,
+    color: "#94a3b8",
+  },
+  modalEmptyText: {
+    fontSize: 13,
+    color: "#94a3b8",
+    paddingVertical: 8,
+  },
+  modalCloseBtn: {
+    marginTop: 16,
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  modalCloseBtnText: {
+    color: "#059669",
+    fontWeight: "600",
+    fontSize: 14,
   },
 });

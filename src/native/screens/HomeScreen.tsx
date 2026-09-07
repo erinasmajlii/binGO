@@ -4,6 +4,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "../../lib/AuthContext";
+import { useI18n } from "../../lib/i18n/I18nContext";
 import {
   fetchUserEcoXpFromDb,
   getCaptureStats,
@@ -13,6 +14,7 @@ const XP_PER_LEVEL = 5000;
 
 export function HomeScreen() {
   const router = useRouter();
+  const { t } = useI18n();
   const { user, displayName, userKey } = useAuth();
   const [ecoXp, setEcoXp] = useState(0);
   const [streakDays, setStreakDays] = useState(0);
@@ -57,13 +59,13 @@ export function HomeScreen() {
           onPress={goToProfile}
           activeOpacity={0.75}
           accessibilityRole="button"
-          accessibilityLabel="Open profile"
+          accessibilityLabel={t("home.openProfile")}
         >
           <View style={styles.xpBadge}>
             <Text style={styles.xpText}>{ecoXp.toLocaleString()}</Text>
           </View>
           <View style={styles.lvBadge}>
-            <Text style={styles.lvText}>Lv {level}</Text>
+            <Text style={styles.lvText}>{t("home.levelBadge", { level })}</Text>
           </View>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{userInitial}</Text>
@@ -73,11 +75,9 @@ export function HomeScreen() {
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>HOME</Text>
-          <Text style={styles.pageTitle}>Your impact, today.</Text>
-          <Text style={styles.pageSubtitle}>
-            Quick snapshot of your eco progress. Report trash, complete missions, and climb the ranks.
-          </Text>
+          <Text style={styles.sectionLabel}>{t("home.sectionLabel")}</Text>
+          <Text style={styles.pageTitle}>{t("home.title")}</Text>
+          <Text style={styles.pageSubtitle}>{t("home.subtitle")}</Text>
         </View>
 
         {/* Stats Grid */}
@@ -87,10 +87,10 @@ export function HomeScreen() {
               <View style={[styles.iconBox, { backgroundColor: "#fb923c" }]}>
                 <Ionicons name="flame" size={20} color="#fff" />
               </View>
-              <Text style={[styles.cardLabel, { color: "#ea580c" }]}>STREAK</Text>
+              <Text style={[styles.cardLabel, { color: "#ea580c" }]}>{t("home.streak")}</Text>
             </View>
-            <Text style={styles.cardValue}>{streakDays} days</Text>
-            <Text style={styles.cardSub}>Keep it going</Text>
+            <Text style={styles.cardValue}>{t("home.streakDays", { count: streakDays })}</Text>
+            <Text style={styles.cardSub}>{t("home.keepItGoing")}</Text>
           </View>
 
           <View style={[styles.card, styles.blueCard]}>
@@ -98,10 +98,10 @@ export function HomeScreen() {
               <View style={[styles.iconBox, { backgroundColor: "#60a5fa" }]}>
                 <Ionicons name="checkmark-circle" size={20} color="#fff" />
               </View>
-              <Text style={[styles.cardLabel, { color: "#2563eb" }]}>CLEANUPS</Text>
+              <Text style={[styles.cardLabel, { color: "#2563eb" }]}>{t("home.cleanups")}</Text>
             </View>
             <Text style={styles.cardValue}>{cleanupCount}</Text>
-            <Text style={styles.cardSub}>Verified missions</Text>
+            <Text style={styles.cardSub}>{t("home.verifiedMissions")}</Text>
           </View>
         </View>
 
@@ -109,7 +109,7 @@ export function HomeScreen() {
         <View style={styles.actionCard}>
           <View style={styles.actionHeader}>
             <MaterialCommunityIcons name="target" size={20} color="#10b981" />
-            <Text style={styles.actionTitle}>Suggested next actions</Text>
+            <Text style={styles.actionTitle}>{t("home.suggestedActions")}</Text>
           </View>
 
           <TouchableOpacity style={styles.actionItem} activeOpacity={0.8} onPress={() => router.push("/(tabs)/report")}>
@@ -117,8 +117,8 @@ export function HomeScreen() {
               <Ionicons name="trash" size={20} color="#fff" />
             </View>
             <View style={styles.actionText}>
-              <Text style={styles.actionName}>Report nearby trash</Text>
-              <Text style={styles.actionSub}>Fastest way to gain EcoXP</Text>
+              <Text style={styles.actionName}>{t("home.reportNearbyTrash")}</Text>
+              <Text style={styles.actionSub}>{t("home.fastestWayToXp")}</Text>
             </View>
           </TouchableOpacity>
 
@@ -127,8 +127,8 @@ export function HomeScreen() {
               <Ionicons name="trophy" size={20} color="#fff" />
             </View>
             <View style={styles.actionText}>
-              <Text style={styles.actionName}>Complete a mission</Text>
-              <Text style={styles.actionSub}>Bonus points + leaderboard boosts</Text>
+              <Text style={styles.actionName}>{t("home.completeAMission")}</Text>
+              <Text style={styles.actionSub}>{t("home.bonusPointsLeaderboard")}</Text>
             </View>
           </TouchableOpacity>
         </View>

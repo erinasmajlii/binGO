@@ -8,7 +8,14 @@ beforeEach(() => {
 });
 
 describe("active route storage", () => {
-  const destination = { id: "bin-1", latitude: 41.32, longitude: 19.81, source: "manual" as const };
+  const destination = {
+    id: "bin-1",
+    latitude: 41.32,
+    longitude: 19.81,
+    source: "manual" as const,
+    currentStatus: null,
+    statusUpdatedAt: null,
+  };
 
   it("returns null when nothing has been set", async () => {
     expect(await getActiveRoute()).toBeNull();

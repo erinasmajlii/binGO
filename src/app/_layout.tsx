@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
+import { I18nProvider } from '../lib/i18n/I18nContext';
 
 function RootNavigator() {
   const { isLoading } = useAuth();
@@ -25,8 +26,10 @@ function RootNavigator() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootNavigator />
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <RootNavigator />
+      </AuthProvider>
+    </I18nProvider>
   );
 }

@@ -12,9 +12,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { checkSupabaseReachable, getSupabaseConfigIssue, supabase } from "../../lib/supabase";
+import { useI18n } from "../../lib/i18n/I18nContext";
 
 export function RegisterScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -32,11 +34,11 @@ export function RegisterScreen() {
   const handleRegister = async () => {
     setError(null);
 
-    if (!form.name.trim()) { setError("Full name is required."); return; }
-    if (!form.email.trim()) { setError("Email is required."); return; }
-    if (form.password.length < 6) { setError("Password must be at least 6 characters."); return; }
-    if (form.password !== form.confirmPassword) { setError("Passwords do not match."); return; }
-    if (!form.acceptTerms) { setError("You must accept the terms & conditions."); return; }
+    if (!form.name.trim()) { setError(t("register.fullNameRequired")); return; }
+    if (!form.email.trim()) { setError(t("register.emailRequired")); return; }
+    if (form.password.length < 6) { setError(t("register.passwordTooShort")); return; }
+    if (form.password !== form.confirmPassword) { setError(t("register.passwordsDontMatch")); return; }
+    if (!form.acceptTerms) { setError(t("register.mustAcceptTerms")); return; }
 
     const configIssue = getSupabaseConfigIssue();
     if (configIssue) {
@@ -51,7 +53,7 @@ export function RegisterScreen() {
     }
 
     if (!supabase) {
-      setError("Supabase client is not configured. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env and restart Expo.");
+      setError(t("register.supabaseNotConfiguredFull"));
       return;
     }
 
@@ -79,9 +81,7 @@ export function RegisterScreen() {
       if (signInError) {
         // Some projects require email confirmation before login — there is
         // no session yet, so don't pretend the user is signed in.
-        setError(
-          "Account created. Check your email to confirm it, then log in.",
-        );
+        setError(t("register.accountCreatedCheckEmail"));
         router.push("/(tabs)/profile");
         return;
       }
@@ -90,13 +90,11 @@ export function RegisterScreen() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message.toLowerCase().includes("network request failed")) {
-        setError(
-          "Cannot reach Supabase from this device. Check internet access and confirm EXPO_PUBLIC_SUPABASE_URL points to a real project URL."
-        );
+        setError(t("register.cannotReachSupabase"));
         return;
       }
 
-      setError(message || "Registration failed.");
+      setError(message || t("register.registrationFailed"));
       return;
     } finally {
       setLoading(false);
@@ -110,25 +108,23 @@ export function RegisterScreen() {
       <View style={[styles.circle, { bottom: -60, right: -60, width: 200, height: 200, backgroundColor: "#a7f3d0" }]} />
 
       <View style={[styles.header, { paddingTop: Math.max(12, insets.top) }] }>
-        <Text style={styles.subtitle}>Welcome to</Text>
+        <Text style={styles.subtitle}>{t("register.welcomeTo")}</Text>
         <Text style={styles.title}>
           bin<Text style={styles.titleBold}>Go</Text>
         </Text>
-        <Text style={styles.description}>
-          How you manage your waste?{"\n"}If not, then start from now.
-        </Text>
+        <Text style={styles.description}>{t("register.description")}</Text>
       </View>
 
       <TextInput
         style={styles.input}
-        placeholder="Full name"
+        placeholder={t("register.fullNamePlaceholder")}
         placeholderTextColor="#94a3b8"
         value={form.name}
         onChangeText={(v) => set("name", v)}
       />
       <TextInput
         style={styles.input}
-        placeholder="Email address"
+        placeholder={t("register.emailAddressPlaceholder")}
         placeholderTextColor="#94a3b8"
         keyboardType="email-address"
         autoCapitalize="none"
@@ -137,7 +133,7 @@ export function RegisterScreen() {
       />
       <TextInput
         style={styles.input}
-        placeholder="Password"
+        placeholder={t("register.passwordPlaceholderReg")}
         placeholderTextColor="#94a3b8"
         secureTextEntry
         value={form.password}
@@ -145,7 +141,7 @@ export function RegisterScreen() {
       />
       <TextInput
         style={styles.input}
-        placeholder="Confirm password"
+        placeholder={t("register.confirmPasswordPlaceholderReg")}
         placeholderTextColor="#94a3b8"
         secureTextEntry
         value={form.confirmPassword}
@@ -153,7 +149,7 @@ export function RegisterScreen() {
       />
       <TextInput
         style={styles.input}
-        placeholder="Address"
+        placeholder={t("register.addressPlaceholder")}
         placeholderTextColor="#94a3b8"
         value={form.address}
         onChangeText={(v) => set("address", v)}
@@ -166,7 +162,7 @@ export function RegisterScreen() {
           trackColor={{ true: "#10b981" }}
           thumbColor="#fff"
         />
-        <Text style={styles.termsText}>I accept the terms & conditions</Text>
+        <Text style={styles.termsText}>{t("register.acceptTerms")}</Text>
       </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -179,12 +175,12 @@ export function RegisterScreen() {
       >
         {loading
           ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.buttonText}>Register</Text>
+          : <Text style={styles.buttonText}>{t("register.registerBtn")}</Text>
         }
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.push("/(tabs)/profile")} style={styles.skip}>
-        <Text style={styles.skipText}>Already have an account? Login</Text>
+        <Text style={styles.skipText}>{t("register.alreadyHaveAccount")}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
