@@ -694,18 +694,6 @@ export function MapScreen() {
                 {bin.currentStatus === "full" ? "🗑️" : bin.currentStatus === "damaged" ? "⚠️" : "🗑️"}
               </Text>
             </View>
-            {bin.currentStatus ? (
-              <View
-                style={[
-                  styles.binStatusBadge,
-                  bin.currentStatus === "full" ? styles.binStatusBadgeFull : styles.binStatusBadgeDamaged,
-                ]}
-              >
-                <Text style={styles.binStatusBadgeText}>
-                  {bin.currentStatus === "full" ? t("map.full").toUpperCase() : t("map.damaged").toUpperCase()}
-                </Text>
-              </View>
-            ) : null}
           </Marker>
         ))}
 
@@ -984,28 +972,6 @@ const styles = StyleSheet.create({
   },
   binEmoji: {
     fontSize: 16,
-  },
-  binStatusBadge: {
-    position: "absolute",
-    top: -6,
-    alignSelf: "center",
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  binStatusBadgeFull: {
-    backgroundColor: "#fef3c7",
-    borderColor: "#f59e0b",
-  },
-  binStatusBadgeDamaged: {
-    backgroundColor: "#fee2e2",
-    borderColor: "#dc2626",
-  },
-  binStatusBadgeText: {
-    fontSize: 8,
-    fontWeight: "700",
-    color: "#1e293b",
   },
   modalOverlay: {
     flex: 1,

@@ -768,7 +768,6 @@ export function ProfileScreen() {
               onPress={() => setLanguage("en")}
               activeOpacity={0.85}
             >
-              <Text style={styles.languageFlag}>🇬🇧</Text>
               <Text style={[styles.languageText, language === "en" && styles.languageTextActive]}>
                 {t("profile.languageEnglish")}
               </Text>
@@ -779,7 +778,6 @@ export function ProfileScreen() {
               onPress={() => setLanguage("sq")}
               activeOpacity={0.85}
             >
-              <Text style={styles.languageFlag}>🇦🇱</Text>
               <Text style={[styles.languageText, language === "sq" && styles.languageTextActive]}>
                 {t("profile.languageAlbanian")}
               </Text>
@@ -982,7 +980,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#10b981",
     borderColor: "#10b981",
   },
-  languageFlag: { fontSize: 18 },
   languageText: { color: "#059669", fontWeight: "600", fontSize: 14 },
   languageTextActive: { color: "#fff" },
   logoutBtn: {

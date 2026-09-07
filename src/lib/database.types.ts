@@ -138,6 +138,44 @@ export type Database = {
           },
         ]
       }
+      capture_records: {
+        Row: {
+          category: string
+          confidence: number
+          created_at: string
+          id: string
+          photo_uri: string | null
+          points: number
+          user_id: string
+        }
+        Insert: {
+          category: string
+          confidence?: number
+          created_at?: string
+          id?: string
+          photo_uri?: string | null
+          points?: number
+          user_id: string
+        }
+        Update: {
+          category?: string
+          confidence?: number
+          created_at?: string
+          id?: string
+          photo_uri?: string | null
+          points?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_records_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "display_exp"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       leaderboard_scores: {
         Row: {
           display_name: string | null

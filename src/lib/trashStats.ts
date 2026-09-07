@@ -420,6 +420,38 @@ export async function classifyTrashPhoto(
   };
 }
 
+/**
+ * Insert one capture into `capture_records` (server-side source of truth
+ * for a signed-in user's Profile stats — see 0008_capture_records.sql).
+ * No-op for guests (no auth.uid() to attach the row to) or when offline;
+ * the local write in saveCaptureRecord() below is what keeps the app usable
+ * in both cases.
+ */
+async function insertCaptureRecordToDb(record: CaptureRecord): Promise<boolean> {
+  if (!supabase) return false;
+
+  const identity = await getCurrentUserIdentity();
+  if (!identity) return false;
+
+  try {
+    // user_id is supplied to satisfy the column's NOT NULL constraint, but
+    // the BEFORE INSERT trigger (set_capture_record_user_id) unconditionally
+    // overwrites it with auth.uid() — a client can never spoof another
+    // user's id here, same guarantee as bins.created_by / bin_reports.reported_by.
+    const { error } = await supabase.from("capture_records").insert({
+      user_id: identity.id,
+      category: record.category,
+      confidence: record.confidence,
+      points: record.points,
+      photo_uri: record.uri || null,
+      created_at: new Date(record.createdAt).toISOString(),
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 export async function saveCaptureRecord(
   uri: string,
   category: TrashCategory,
@@ -435,12 +467,16 @@ export async function saveCaptureRecord(
     points: 100,
   };
 
+  // Local write always happens first — it's the only record a guest ever
+  // gets, and it keeps the capture usable immediately even if the DB write
+  // below fails (offline, transient error).
   const records = await readRecordsForUser(userKey);
   records.unshift(record);
 
   const trimmedRecords = records.slice(0, 300);
   await writeRecordsForUser(trimmedRecords, userKey);
   await incrementUserEcoXpInDb(record.points, userKey);
+  await insertCaptureRecordToDb(record);
 
   return record;
 }
@@ -525,6 +561,95 @@ export async function getGlobalLeaderboard(
   }
 }
 
+const CAPTURE_RECORDS_FETCH_LIMIT = 500;
+
+/**
+ * Fetch this signed-in user's capture history from the DB. RLS already
+ * scopes `capture_records` to the caller's own rows, so no explicit
+ * `user_id` filter is needed (same pattern as mission_claims reads).
+ * Returns `null` (not `[]`) when the DB couldn't be reached at all, so the
+ * caller can tell "genuinely zero captures" apart from "offline" and fall
+ * back to the local cache only for the latter.
+ */
+async function fetchCaptureRecordsFromDb(): Promise<CaptureRecord[] | null> {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from("capture_records")
+      .select("id,category,confidence,points,photo_uri,created_at")
+      .order("created_at", { ascending: false })
+      .limit(CAPTURE_RECORDS_FETCH_LIMIT);
+
+    if (error || !Array.isArray(data)) return null;
+
+    return data.map((row) => ({
+      id: row.id,
+      uri: row.photo_uri ?? "",
+      category: row.category as TrashCategory,
+      confidence: Number(row.confidence),
+      createdAt: new Date(row.created_at).getTime(),
+      points: Number(row.points),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/** One INSERT with multiple rows is a single atomic statement in Postgres. */
+async function migrateRecordsToDb(records: CaptureRecord[], userId: string): Promise<void> {
+  if (!supabase || records.length === 0) return;
+
+  try {
+    await supabase.from("capture_records").insert(
+      records.map((record) => ({
+        // Satisfies the NOT NULL constraint; the BEFORE INSERT trigger
+        // overwrites this with auth.uid() regardless (see insertCaptureRecordToDb).
+        user_id: userId,
+        category: record.category,
+        confidence: record.confidence,
+        points: record.points,
+        photo_uri: record.uri || null,
+        created_at: new Date(record.createdAt).toISOString(),
+      })),
+    );
+  } catch {
+    // Best-effort — if this fails, the DB just stays empty and the next
+    // getCaptureStats() call retries the same migration.
+  }
+}
+
+// Guards against Home and Profile both racing to migrate the same local
+// history into the DB the moment a user first opens the app post-upgrade.
+let migrationInFlight: Promise<void> | null = null;
+
+/**
+ * Resolves the record set a signed-in user's stats should be computed from:
+ * the DB when reachable, migrating any pre-existing local-only history into
+ * it exactly once (so upgrading to this feature doesn't silently zero out
+ * a user's real past activity), or the local cache as a last resort when
+ * the DB can't be reached at all.
+ */
+async function getRecordsForSignedInUser(userId: string, userKey?: string): Promise<CaptureRecord[]> {
+  const dbRecords = await fetchCaptureRecordsFromDb();
+  if (dbRecords === null) {
+    return readRecordsForUser(userKey);
+  }
+
+  if (dbRecords.length === 0) {
+    const localRecords = await readRecordsForUser(userKey);
+    if (localRecords.length > 0) {
+      if (!migrationInFlight) {
+        migrationInFlight = migrateRecordsToDb(localRecords, userId);
+      }
+      await migrationInFlight;
+      return localRecords;
+    }
+  }
+
+  return dbRecords;
+}
+
 function calculateStreak(records: CaptureRecord[]): number {
   if (records.length === 0) return 0;
 
@@ -552,7 +677,10 @@ export async function getCaptureStats(
   userKey?: string,
   leaderboardTotal?: number,
 ) {
-  const records = await readRecordsForUser(userKey);
+  const identity = await getCurrentUserIdentity();
+  const records = identity
+    ? await getRecordsForSignedInUser(identity.id, userKey)
+    : await readRecordsForUser(userKey);
   const total = records.length;
   const capturePoints = records.reduce((sum, record) => sum + record.points, 0);
   const missionBonusPoints = await readMissionBonusPoints(userKey);
@@ -614,7 +742,7 @@ export async function getCaptureStats(
     streak: calculateStreak(records),
     weeklyRate: Number((recent.length / 7).toFixed(1)),
     breakdown,
-    recentPhotos: records.slice(0, 8),
+    recentPhotos: records.slice(0, 3),
     datasetCounts: DATASET_COUNTS,
   };
 }
