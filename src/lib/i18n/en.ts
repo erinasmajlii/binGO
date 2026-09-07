@@ -171,6 +171,8 @@ const en = {
     reportCondition: "Report condition",
     full: "Full",
     damaged: "Damaged",
+    clean: "Clean",
+    reportedClean: "Cleaned",
     recentReports: "Recent reports",
     noReportsYet: "No reports yet for this bin.",
     binTitleFull: "Bin — Full",

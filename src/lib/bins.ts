@@ -1,7 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 
+/** A bin's current denormalized state — never "clean": that just means null (back to normal). */
 export type BinStatus = "full" | "damaged";
+
+/**
+ * What can be reported for a bin. "clean" is a distinct report you can file
+ * (someone confirmed the bin was emptied/fixed) — it doesn't set
+ * bins.current_status to a literal "clean" value, it clears it back to null
+ * (see apply_bin_report_to_bin() in 0009_bin_reports_clean_status.sql) and
+ * marks any still-open full/damaged reports for that bin as resolved.
+ */
+export type BinReportStatus = BinStatus | "clean";
 
 export type BinMarker = {
   id: string;
@@ -16,7 +26,7 @@ export type BinMarker = {
 export type BinReport = {
   id: string;
   binId: string;
-  status: BinStatus;
+  status: BinReportStatus;
   reportedBy: string | null;
   createdAt: string;
   resolved: boolean;
@@ -199,16 +209,18 @@ export async function removeBinFromDatabase(id: string): Promise<boolean> {
 }
 
 /**
- * Report a bin's condition (Full/Damaged). Inserts a new row into
+ * Report a bin's condition (Full/Damaged/Clean). Inserts a new row into
  * bin_reports (kept as full history for a future municipality dashboard —
- * see supabase/migrations/0007_bin_reports.sql) — a trigger there updates
- * bins.current_status to match, which the existing bins realtime
- * subscription already picks up, so no separate realtime wiring is needed.
- * Requires authentication (RLS); returns false for a guest/anonymous caller.
+ * see supabase/migrations/0007_bin_reports.sql and
+ * 0009_bin_reports_clean_status.sql) — a trigger there updates
+ * bins.current_status to match (or clears it to null for "clean"), which
+ * the existing bins realtime subscription already picks up, so no separate
+ * realtime wiring is needed. Requires authentication (RLS); returns false
+ * for a guest/anonymous caller.
  */
 export async function reportBinStatus(
   binId: string,
-  status: BinStatus,
+  status: BinReportStatus,
 ): Promise<boolean> {
   if (!supabase) return false;
 
@@ -248,11 +260,11 @@ export async function fetchBinReports(binId: string): Promise<BinReport[]> {
     if (error || !Array.isArray(data)) return [];
 
     return data
-      .filter((row) => row.status === "full" || row.status === "damaged")
+      .filter((row) => row.status === "full" || row.status === "damaged" || row.status === "clean")
       .map((row) => ({
         id: String(row.id),
         binId: String(row.bin_id),
-        status: row.status as BinStatus,
+        status: row.status as BinReportStatus,
         reportedBy: row.reported_by ?? null,
         createdAt: String(row.created_at),
         resolved: Boolean(row.resolved),

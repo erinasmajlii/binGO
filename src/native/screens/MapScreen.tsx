@@ -23,7 +23,7 @@ import * as Location from "expo-location";
 import {
   BinMarker,
   BinReport,
-  BinStatus,
+  BinReportStatus,
   loadBins,
   addBinToDatabase,
   removeBinFromDatabase,
@@ -577,7 +577,7 @@ export function MapScreen() {
   }, []);
 
   const handleReportStatus = useCallback(
-    async (status: BinStatus) => {
+    async (status: BinReportStatus) => {
       if (!selectedBin) return;
 
       if (!user) {
@@ -596,17 +596,21 @@ export function MapScreen() {
         // Optimistic local update — the realtime subscription will confirm
         // this shortly, but there's no reason to wait for it to round-trip
         // before the reporting user sees their own change reflected.
+        // "clean" clears the bin back to its normal (green) state rather
+        // than becoming a literal currentStatus value — see
+        // apply_bin_report_to_bin() in 0009_bin_reports_clean_status.sql.
         const nowIso = new Date().toISOString();
+        const nextStatus = status === "clean" ? null : status;
         setBins((prev) =>
           prev.map((bin) =>
             bin.id === selectedBin.id
-              ? { ...bin, currentStatus: status, statusUpdatedAt: nowIso }
+              ? { ...bin, currentStatus: nextStatus, statusUpdatedAt: nowIso }
               : bin,
           ),
         );
         setSelectedBin((prev) =>
           prev && prev.id === selectedBin.id
-            ? { ...prev, currentStatus: status, statusUpdatedAt: nowIso }
+            ? { ...prev, currentStatus: nextStatus, statusUpdatedAt: nowIso }
             : prev,
         );
         const reports = await fetchBinReports(selectedBin.id);
@@ -845,30 +849,60 @@ export function MapScreen() {
 
                 <Text style={styles.modalSectionTitle}>{t("map.reportCondition")}</Text>
                 <View style={styles.modalActionRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.modalActionBtn,
-                      styles.modalActionBtnFull,
-                      submittingReport && styles.modalActionBtnDisabled,
-                    ]}
-                    onPress={() => handleReportStatus("full")}
-                    disabled={submittingReport}
-                  >
-                    <Ionicons name="archive" size={18} color="#b45309" />
-                    <Text style={styles.modalActionBtnText}>{t("map.full")}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.modalActionBtn,
-                      styles.modalActionBtnDamaged,
-                      submittingReport && styles.modalActionBtnDisabled,
-                    ]}
-                    onPress={() => handleReportStatus("damaged")}
-                    disabled={submittingReport}
-                  >
-                    <Ionicons name="warning" size={18} color="#b91c1c" />
-                    <Text style={styles.modalActionBtnText}>{t("map.damaged")}</Text>
-                  </TouchableOpacity>
+                  {liveSelectedBin.currentStatus === "full" ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.modalActionBtn,
+                        styles.modalActionBtnClean,
+                        submittingReport && styles.modalActionBtnDisabled,
+                      ]}
+                      onPress={() => handleReportStatus("clean")}
+                      disabled={submittingReport}
+                    >
+                      <Ionicons name="checkmark-circle" size={18} color="#059669" />
+                      <Text style={styles.modalActionBtnText}>{t("map.clean")}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.modalActionBtn,
+                        styles.modalActionBtnFull,
+                        submittingReport && styles.modalActionBtnDisabled,
+                      ]}
+                      onPress={() => handleReportStatus("full")}
+                      disabled={submittingReport}
+                    >
+                      <Ionicons name="archive" size={18} color="#b45309" />
+                      <Text style={styles.modalActionBtnText}>{t("map.full")}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {liveSelectedBin.currentStatus === "damaged" ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.modalActionBtn,
+                        styles.modalActionBtnClean,
+                        submittingReport && styles.modalActionBtnDisabled,
+                      ]}
+                      onPress={() => handleReportStatus("clean")}
+                      disabled={submittingReport}
+                    >
+                      <Ionicons name="checkmark-circle" size={18} color="#059669" />
+                      <Text style={styles.modalActionBtnText}>{t("map.clean")}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[
+                        styles.modalActionBtn,
+                        styles.modalActionBtnDamaged,
+                        submittingReport && styles.modalActionBtnDisabled,
+                      ]}
+                      onPress={() => handleReportStatus("damaged")}
+                      disabled={submittingReport}
+                    >
+                      <Ionicons name="warning" size={18} color="#b91c1c" />
+                      <Text style={styles.modalActionBtnText}>{t("map.damaged")}</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
                     style={[styles.modalActionBtn, styles.modalActionBtnDelete]}
                     onPress={() => {
@@ -893,12 +927,12 @@ export function MapScreen() {
                   binReports.map((report) => (
                     <View key={report.id} style={styles.modalReportRow}>
                       <Ionicons
-                        name={report.status === "full" ? "archive" : "warning"}
+                        name={report.status === "full" ? "archive" : report.status === "damaged" ? "warning" : "checkmark-circle"}
                         size={14}
-                        color={report.status === "full" ? "#b45309" : "#b91c1c"}
+                        color={report.status === "full" ? "#b45309" : report.status === "damaged" ? "#b91c1c" : "#059669"}
                       />
                       <Text style={styles.modalReportText}>
-                        {report.status === "full" ? t("map.full") : t("map.damaged")}
+                        {report.status === "full" ? t("map.full") : report.status === "damaged" ? t("map.damaged") : t("map.reportedClean")}
                       </Text>
                       <Text style={styles.modalReportTime}>
                         {new Date(report.createdAt).toLocaleString()}
@@ -1064,6 +1098,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#fef2f2",
     borderWidth: 1,
     borderColor: "#dc2626",
+  },
+  modalActionBtnClean: {
+    backgroundColor: "#ecfdf5",
+    borderWidth: 1,
+    borderColor: "#10b981",
   },
   modalActionBtnDelete: {
     backgroundColor: "#f1f5f9",

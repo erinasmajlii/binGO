@@ -171,6 +171,8 @@ const sq: Translations = {
     reportCondition: "Raporto gjendjen",
     full: "Plot",
     damaged: "I dëmtuar",
+    clean: "Pastruar",
+    reportedClean: "U pastrua",
     recentReports: "Raportet e fundit",
     noReportsYet: "Ende s'ka raporte për këtë bin.",
     binTitleFull: "Bin — Plot",
