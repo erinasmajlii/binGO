@@ -17,7 +17,7 @@
     "ai:install:dev": "pip install -r server/requirements-dev.txt",
     "ai:test": "cd server && pytest tests/",
     "ai:train:taco": "python server/train_taco_classifier.py --dataset-root ./server/taco-dataset",
-    "ai:start": "c:/Users/Admin/Desktop/Analize/binGO/.venv/Scripts/python.exe server/classifier_api.py",
+    "ai:start": "python server/classifier_api.py",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "test": "vitest run"

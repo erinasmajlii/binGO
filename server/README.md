@@ -19,10 +19,19 @@ The app reads this `mode` field and labels the result "(estimated)" in the UI wh
 
 ## Running locally
 
+Each developer creates their own virtual environment — `.venv/` is machine-specific (absolute paths baked into its activation scripts) and is gitignored; never commit it or hardcode a path into it (`package.json`'s `ai:start` used to do exactly that and broke for every teammate — it now just runs `python`, relying on your venv being active).
+
 ```bash
-pip install -r requirements.txt
-python classifier_api.py   # listens on 0.0.0.0:8000
+# from the repo root
+python -m venv .venv
+.venv\Scripts\Activate.ps1        # Windows PowerShell — run this in every new terminal before using ai:* scripts
+# source .venv/bin/activate       # macOS/Linux equivalent
+
+pip install -r server/requirements.txt
+python server/classifier_api.py   # listens on 0.0.0.0:8000
 ```
+
+Or, once the venv is activated, `pnpm ai:install` + `pnpm ai:start` (and `pnpm start:all` runs this alongside the Expo dev server) — these only work correctly while the venv is active in that same terminal, since they resolve to whatever `python` is first on `PATH`.
 
 ## Authentication
 
