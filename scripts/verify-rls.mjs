@@ -179,6 +179,37 @@ async function testBinReportsPubliclyReadable() {
   report("anon can read bin_reports (200, not blocked)", res.ok, `HTTP ${res.status}`);
 }
 
+async function testCaptureRecordsAnonReadDenied() {
+  console.log("\n[10] anon cannot read other users' capture_records");
+  const res = await fetch(`${URL}/rest/v1/capture_records?select=*&limit=5`, { headers });
+  const rows = await res.json();
+  // No SELECT policy exists for anon at all (unlike bins/bin_reports, this is
+  // private per-user data), so RLS should return zero rows, same as mission_claims.
+  report("anon sees zero capture_records rows", res.ok && Array.isArray(rows) && rows.length === 0, `HTTP ${res.status}, ${Array.isArray(rows) ? rows.length : "?"} rows`);
+}
+
+async function testCaptureRecordsAnonInsertDenied() {
+  console.log("\n[11] anon cannot insert capture_records");
+  const res = await fetch(`${URL}/rest/v1/capture_records`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json", Prefer: "return=representation" },
+    body: JSON.stringify({ category: "plastic" }),
+  });
+  const inserted = res.ok;
+  if (inserted) {
+    // Clean up if the insert unexpectedly succeeded (would only happen if RLS regressed).
+    const body = await res.json().catch(() => null);
+    const id = Array.isArray(body) ? body[0]?.id : undefined;
+    if (id) {
+      await fetch(`${URL}/rest/v1/capture_records?id=eq.${id}`, {
+        method: "DELETE",
+        headers: { apikey: env.SUPABASE_SECRET_KEY ?? ANON_KEY, Authorization: `Bearer ${env.SUPABASE_SECRET_KEY ?? ANON_KEY}` },
+      }).catch(() => {});
+    }
+  }
+  report("anon INSERT on capture_records is rejected", !inserted, inserted ? `HTTP ${res.status} — insert succeeded!` : undefined);
+}
+
 console.log(`Running RLS regression checks against ${URL}\n(anon-key coverage only — see script header for scope)`);
 
 await testDisplayExpNoEmail();
@@ -190,6 +221,8 @@ await testClaimMissionRequiresAuth();
 await testMissionClaimsAnonReadDenied();
 await testBinReportsAnonInsertDenied();
 await testBinReportsPubliclyReadable();
+await testCaptureRecordsAnonReadDenied();
+await testCaptureRecordsAnonInsertDenied();
 
 console.log(`\n${failures === 0 ? "All checks passed." : `${failures} check(s) FAILED.`}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -107,6 +107,8 @@ const sq: Translations = {
     recentCaptures: "Kapjet e Fundit",
     noPhotosYet: "Ende s'ka foto. Kap mbeturina te Raporto për ta plotësuar këtë seksion.",
     logout: "Dilni",
+    signInCta: "Kyçu",
+    dontHaveAccount: "Nuk ke llogari? Regjistrohu",
     language: "Gjuha",
     languageEnglish: "English",
     languageAlbanian: "Shqip",

@@ -107,6 +107,8 @@ const en = {
     recentCaptures: "Recent Captures",
     noPhotosYet: "No photos yet. Capture trash from Report to populate this section.",
     logout: "Log out",
+    signInCta: "Sign in",
+    dontHaveAccount: "Don't have an account? Register",
     language: "Language",
     languageEnglish: "English",
     languageAlbanian: "Shqip",

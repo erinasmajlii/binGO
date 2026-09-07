@@ -570,6 +570,13 @@ export function ProfileScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.forgotPasswordBtn}
+                  onPress={() => router.push("/register")}
+                >
+                  <Text style={styles.forgotPasswordText}>{t("profile.dontHaveAccount")}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.skipBtn}
                   onPress={continueAsGuest}
                 >
@@ -786,7 +793,9 @@ export function ProfileScreen() {
         </View>
 
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutText}>{t("profile.logout")}</Text>
+          <Text style={styles.logoutText}>
+            {isGuest && !user ? t("profile.signInCta") : t("profile.logout")}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
