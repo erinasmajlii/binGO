@@ -177,6 +177,7 @@ const sq: Translations = {
     binTitleDamaged: "Bin — I dëmtuar",
     binTitlePlain: "Bin",
     helperText: "Mbaj shtypur hartën për ta vendosur manualisht. Trokit një koshi për ta fshirë.",
+    helperTextWeb: "Kliko hartën për të vendosur një kosh manualisht. Kliko një kosh për të parë detajet.",
     yourLocationTitle: "Vendndodhja Jote",
     yourLocationDescription: "Ky është pozicioni yt aktual",
     binDescriptionCurrent: "Vendosur në vendndodhjen tënde aktuale",

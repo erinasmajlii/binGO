@@ -177,6 +177,7 @@ const en = {
     binTitleDamaged: "Bin — Damaged",
     binTitlePlain: "Bin",
     helperText: "Long press map to place manually. Tap a bin to remove it.",
+    helperTextWeb: "Click the map to place a bin manually. Click a bin to view details.",
     yourLocationTitle: "Your Location",
     yourLocationDescription: "This is your current position",
     binDescriptionCurrent: "Placed at your current location",
