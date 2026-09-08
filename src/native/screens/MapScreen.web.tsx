@@ -41,6 +41,25 @@ const initialCenter: LatLon = {
 };
 const DEFAULT_ZOOM = 15;
 
+// CARTO's Voyager style reads much closer to the clean light theme phones
+// show (Google/Apple Maps) than raw OpenStreetMap's default colorful tiles —
+// pixel-identical isn't possible on web without a paid Google Maps API key
+// either way. Falls back to plain OSM tiles (genuinely free, no key) when no
+// CARTO key is configured, so the map still works for anyone without one.
+const CARTO_API_KEY = process.env.EXPO_PUBLIC_CARTO_API_KEY;
+const TILE_LAYER = CARTO_API_KEY
+  ? {
+      url: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: "abcd",
+    }
+  : {
+      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      subdomains: "abc",
+    };
+
 function binDivIcon(status: BinStatus | null): L.DivIcon {
   const border = status === "full" ? "#f59e0b" : status === "damaged" ? "#dc2626" : "#10b981";
   const bg = status === "full" ? "#fffbeb" : status === "damaged" ? "#fef2f2" : "#ffffff";
@@ -578,15 +597,7 @@ export function MapScreen() {
 
       <View style={styles.mapWrapper}>
         <MapContainer center={center} zoom={DEFAULT_ZOOM} style={styles.map as object} ref={mapRef}>
-          {/* Plain OpenStreetMap tiles: genuinely free, no API key, no
-              account required — CARTO's basemaps.cartocdn.com now demands a
-              key even for the "free" Voyager style, which broke the map in
-              production. Pixel-identical to Google/Apple Maps isn't possible
-              on web without a paid Google Maps API key either way. */}
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+          <TileLayer attribution={TILE_LAYER.attribution} url={TILE_LAYER.url} subdomains={TILE_LAYER.subdomains} />
 
           <MapClickHandler onMapClick={(lat, lon) => void addBinManually(lat, lon)} />
 
