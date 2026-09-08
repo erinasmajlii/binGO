@@ -578,15 +578,14 @@ export function MapScreen() {
 
       <View style={styles.mapWrapper}>
         <MapContainer center={center} zoom={DEFAULT_ZOOM} style={styles.map as object} ref={mapRef}>
-          {/* Voyager: a free, no-API-key tile style that reads much closer to
-              the clean light theme phones show (Google/Apple Maps) than raw
-              OpenStreetMap's default colorful tiles — pixel-identical isn't
-              possible on web without a paid Google Maps API key. */}
+          {/* Plain OpenStreetMap tiles: genuinely free, no API key, no
+              account required — CARTO's basemaps.cartocdn.com now demands a
+              key even for the "free" Voyager style, which broke the map in
+              production. Pixel-identical to Google/Apple Maps isn't possible
+              on web without a paid Google Maps API key either way. */}
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            subdomains="abcd"
-            maxZoom={20}
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
           <MapClickHandler onMapClick={(lat, lon) => void addBinManually(lat, lon)} />
