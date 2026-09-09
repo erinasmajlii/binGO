@@ -2,6 +2,19 @@
 
 FastAPI service that classifies a trash photo into one of 6 categories (`cardboard`, `glass`, `metal`, `paper`, `plastic`, `trash`).
 
+## Training the real model
+
+See `DATASET.md` for the dataset (TrashNet, MIT license) and full reproduction steps. Short version:
+
+```bash
+pip install -r server/requirements-train.txt   # adds dataset/eval tooling on top of requirements.txt
+python server/prepare_dataset.py               # validates + splits the dataset (writes split_manifest.json)
+python server/train_classifier.py              # trains, writes server/models/trash_classifier.pth + class_names.json + training_config.json
+python server/evaluate_classifier.py           # scores the held-out test split, writes server/models/evaluation_report.json
+```
+
+`trash_classifier.pth` is gitignored (binary, regenerable) — `class_names.json`, `training_config.json`, and `evaluation_report.json` are tracked, since they're the actual record of what was trained and how well it performs.
+
 ## Modes
 
 `GET /health` and every `POST /classify` response report a `mode` field, honestly:

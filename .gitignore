@@ -32,7 +32,11 @@ Thumbs.db
 
 # large datasets and model files
 server/taco-dataset/
-server/models/
+server/dataset-trashnet/
+server/models/*
+!server/models/class_names.json
+!server/models/training_config.json
+!server/models/evaluation_report.json
 server/sql/
 server/train_taco_classifier.py
 temp_download.py

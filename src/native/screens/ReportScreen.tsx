@@ -13,6 +13,10 @@ import { classifyTrashPhotoWithModel } from "../../lib/trashClassifierApi";
 import { useAuth } from "../../lib/AuthContext";
 import { useI18n } from "../../lib/i18n/I18nContext";
 
+// Below this, a real model prediction is barely above the ~17% random
+// baseline for 6 classes — not confident enough to present as a detection.
+const LOW_CONFIDENCE_THRESHOLD = 0.5;
+
 export function ReportScreen() {
   const { t } = useI18n();
   const [, requestPermission] = useCameraPermissions();
@@ -78,11 +82,17 @@ export function ReportScreen() {
       await saveCaptureRecord(photo.uri, classified.category, classified.confidence, currentUserKey);
       if (!isMountedRef.current) return;
 
-      // Be honest about how this category was determined — only "model" is a
-      // real trained classifier. Both heuristic paths are best-effort guesses.
-      const detectionText =
-        classified.source === "model"
-          ? categoryLabel(classified.category)
+      // Be honest about how this category was determined and how sure the
+      // model actually is — only "model" is a real trained classifier, and
+      // even then a low-confidence top prediction (< 50%, barely above the
+      // ~17% random baseline for 6 classes) shouldn't be presented as a
+      // confident detection. Both heuristic paths are always best-effort
+      // guesses regardless of their reported confidence.
+      const isConfidentModelPrediction = classified.source === "model" && classified.confidence >= LOW_CONFIDENCE_THRESHOLD;
+      const detectionText = isConfidentModelPrediction
+        ? categoryLabel(classified.category)
+        : classified.source === "model"
+          ? `${categoryLabel(classified.category)} ${t("report.lowConfidenceSuffix")}`
           : `${categoryLabel(classified.category)} ${t("report.estimatedSuffix")}`;
       let statusText = t("report.detected", { category: detectionText });
 

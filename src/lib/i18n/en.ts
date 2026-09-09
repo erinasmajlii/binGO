@@ -277,6 +277,7 @@ const en = {
     detectedRouteReady: "Detected {{category}}. Route to nearest bin is ready.",
     detectedSavedReport: "Detected {{category}}. Saved report, opening map.",
     estimatedSuffix: "(estimated)",
+    lowConfidenceSuffix: "(not certain — please double-check)",
     tipsTitle: "Tips for better reports",
     tip1: "Make sure the trash is clearly visible",
     tip2: "Include a bit of the surrounding context",

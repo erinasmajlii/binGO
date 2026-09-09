@@ -1,0 +1,8 @@
+# Training-only dependencies — NOT needed to run classifier_api.py in
+# production, only for prepare_dataset.py / train_classifier.py /
+# evaluate_classifier.py. Kept separate so the deployed API image doesn't
+# carry dataset-download/eval tooling it never uses at runtime.
+-r requirements.txt
+huggingface_hub==1.30.0
+scikit-learn==1.9.0
+matplotlib==3.11.1

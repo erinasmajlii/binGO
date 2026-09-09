@@ -277,6 +277,7 @@ const sq: Translations = {
     detectedRouteReady: "U zbulua {{category}}. Rruga te shporta më e afërt është gati.",
     detectedSavedReport: "U zbulua {{category}}. Raporti u ruajt, duke hapur hartën.",
     estimatedSuffix: "(vlerësim)",
+    lowConfidenceSuffix: "(jo i sigurt — kontrollo edhe vetë)",
     tipsTitle: "Këshilla për raporte më të mira",
     tip1: "Sigurohu që mbeturinat janë të dukshme qartë",
     tip2: "Përfshi pak nga konteksti përreth",
