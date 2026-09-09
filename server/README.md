@@ -56,11 +56,16 @@ Or, once the venv is activated, `pnpm ai:install` + `pnpm ai:start` (and `pnpm s
 
 ## Deploying for real users
 
-A LAN address is a development-only setup — it is unreachable for anyone not on that exact Wi-Fi network. Before shipping to real users:
+A LAN address is a development-only setup — it is unreachable for anyone not on that exact Wi-Fi network (and unreachable at all from a deployed web build, e.g. Vercel — Vercel only hosts the frontend, it cannot run this Python service). Before shipping to real users:
 
-1. Build the container: `docker build -t bingo-classifier .` (see `Dockerfile` in this directory — wraps this same app, no code changes needed).
-2. Deploy it somewhere internet-reachable with HTTPS (a small container host — Fly.io, Render, Railway, or a GPU-enabled host if you want to serve the real trained model faster). This repo does not include that specific deployment step — it depends on which platform/account you use.
-3. Point `EXPO_PUBLIC_CLASSIFIER_API_URL` at the real HTTPS URL for production builds specifically (see the root `eas.json` — the `production` build profile is where this belongs, not the shared `.env` used for local dev).
+1. `Dockerfile` in this directory wraps this same app — `server/models/trash_classifier.pth` is tracked in git (not gitignored, unlike the raw dataset) specifically so a from-scratch build has it, and the CMD respects a platform-provided `$PORT`. No code changes needed for any of the platforms below.
+2. Deploy it somewhere internet-reachable with HTTPS:
+   - **Railway** (recommended — fastest to get running from a GitHub repo): New Project → Deploy from GitHub repo → select this repo → set **Root Directory** to `server` (so it builds `server/Dockerfile`, not the repo root) → Deploy. Railway auto-detects the Dockerfile and injects `$PORT` itself.
+   - Render / Fly.io also work the same way (point them at `server/` as the build context).
+3. Once deployed, hit `<your-url>/health` — confirm `"mode": "model"` (not `"fallback"`) and `"weightsExists": true`.
+4. Point `EXPO_PUBLIC_CLASSIFIER_API_URL` at that HTTPS URL:
+   - For the Vercel web build: Vercel dashboard → Project → Settings → Environment Variables → add `EXPO_PUBLIC_CLASSIFIER_API_URL` → redeploy.
+   - For a native production build: the root `eas.json`'s `production` profile (not the shared `.env` used for local dev).
 
 ## Security notes
 

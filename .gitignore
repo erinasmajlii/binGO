@@ -37,6 +37,12 @@ server/models/*
 !server/models/class_names.json
 !server/models/training_config.json
 !server/models/evaluation_report.json
+# Tracked despite being a binary artifact: Railway/Render/Fly.io build the
+# classifier container straight from this repo with no separate artifact
+# storage set up, so the weights must actually be in git for a deploy to
+# serve real predictions instead of silently falling back to the heuristic.
+# ~9 MB — small enough that this is a reasonable tradeoff for this project.
+!server/models/trash_classifier.pth
 server/sql/
 server/train_taco_classifier.py
 temp_download.py
